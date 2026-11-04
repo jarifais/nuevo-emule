@@ -2795,28 +2795,24 @@ BOOL CPartFile::PerformFileComplete()
 	const CString &strPartfilename(RemoveFileExtension(m_fullname));
 	_tcscpy(newfilename, (LPCTSTR)StripInvalidFilenameChars(newfilename));
 
-	// Keep explicit category destinations even when temporarily offline.
-	// MoveFileWithProgress reports a recoverable completion error instead of
-	// silently placing the file in the global Incoming directory.
-	CString indir(thePrefs.GetCategory(GetCategory())->strIncomingPath);
-	if (GetCategory() == 0)
+	// Recreate a deleted destination only for categories created by
+	// the new "Descargar en..." feature. All other categories keep
+	// their original eMule destination/fallback behaviour.
+	const Category_Struct *category = thePrefs.GetCategory(GetCategory());
+	if (GetCategory() > 0 && category->strTitle.Left(9) == _T("Destino: ")
+		&& !::PathIsDirectory(category->strIncomingPath)) {
+		CString createPath(category->strIncomingPath);
+		if (!::PathIsRoot(createPath))
+			createPath.TrimRight(_T("\\"));
+		::SHCreateDirectoryEx(NULL, createPath, NULL);
+	}
+	CString indir;
+	if (::PathFileExists(category->strIncomingPath))
+		indir = category->strIncomingPath;
+	else
 		indir = thePrefs.GetMuleDirectory(EMULE_INCOMINGDIR);
 	ASSERT(indir.Right(1) == _T("\\"));
 
-	// Validate only at file completion, not on every block write. Recreate a
-	// deleted destination (including missing intermediate directories) before
-	// moving the completed .part file. Do not redirect custom categories to
-	// Incoming: a disconnected USB disk or unavailable share must remain an
-	// explicit, recoverable completion error instead of silently misfiling data.
-	if (!::PathIsDirectory(indir)) {
-		CString createPath(indir);
-		if (!::PathIsRoot(createPath))
-			createPath.TrimRight(_T("\\"));
-		const int createResult = ::SHCreateDirectoryEx(NULL, createPath, NULL);
-		if (!::PathIsDirectory(indir))
-			theApp.QueueLogLine(true, _T("Cannot recreate download destination \"%s\": %s"),
-				(LPCTSTR)indir, (LPCTSTR)GetErrorMessage(createResult));
-	}
 	// close permanent handle
 	try {
 		if ((HANDLE)m_hpartfile != INVALID_HANDLE_VALUE)
