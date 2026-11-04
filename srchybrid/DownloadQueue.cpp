@@ -956,9 +956,15 @@ void CDownloadQueue::SortByPriority()
 		if (leftCat != rightCat)
 			return leftCat < rightCat;
 		if (leftCat != 0 && leftCategory->downloadInAlphabeticalOrder
-			&& thePrefs.IsExtControlsEnabled()
-			&& !left->GetFileName().IsEmpty() && !right->GetFileName().IsEmpty())
-			return left->GetFileName().CompareNoCase(right->GetFileName()) < 0;
+			&& thePrefs.IsExtControlsEnabled()) {
+			const CString leftName(left->GetFileName());
+			const CString rightName(right->GetFileName());
+			// An empty name must also have a deterministic position:
+			// treating it as equivalent to every non-empty name is not transitive.
+			if (leftName.IsEmpty() != rightName.IsEmpty())
+				return !leftName.IsEmpty();
+			return leftName.CompareNoCase(rightName) < 0;
+		}
 		return false;
 	});
 
