@@ -7,6 +7,12 @@ on:
       - '.github/workflows/bootstrap-emule.yml'
       - 'srchybrid/**'
       - 'scripts/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/bootstrap-emule.yml'
+      - 'srchybrid/**'
+      - 'scripts/**'
   workflow_dispatch:
 
 permissions:
@@ -71,8 +77,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
       - name: Obtener dependencias C++ con commits fijados
         shell: pwsh
         run: |
