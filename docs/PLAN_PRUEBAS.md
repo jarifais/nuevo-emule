@@ -22,7 +22,10 @@ Versión base: eMule Community 0.72a. Esta lista **no implica pruebas manuales r
 | QA-07 | Seleccionar un resultado que ya esté descargándose. | No se crea duplicado ni se cambia su destino. |
 | QA-08 | Descargar dos archivos de igual nombre a un mismo destino. | No se sobrescribe silenciosamente ningún archivo existente. |
 | QA-09 | Utilizar una carpeta de red accesible (UNC). | La selección y el traslado final funcionan, si la red y permisos lo permiten. |
-| QA-10 | Quitar permisos o desconectar el destino durante la descarga. | **Limitación de la base original:** eMule puede redirigir la finalización a Incoming si desaparece el destino. No considerar superado hasta modificar y probar ese comportamiento. |
+| QA-10 | Borrar la carpeta de destino tras iniciar una descarga, con el volumen aún conectado. | Al completarse el archivo, eMule recrea la carpeta y guarda allí el archivo; no lo desvía a Incoming. |
+| QA-11 | Borrar varios directorios intermedios del destino, con el volumen aún conectado. | Se recrea el árbol de carpetas antes de mover el archivo completado. |
+| QA-12 | Desconectar el SSD USB o dejar inaccesible un recurso UNC al completar. | El destino configurado no se cambia; se informa del fallo, sin desviar a Incoming ni eliminar el .part por una falsa finalización. |
+| QA-13 | Reiniciar eMule con el destino de categoría temporalmente inaccesible y después restaurarlo. | Category.ini conserva la ruta; cuando vuelve a estar disponible, la descarga puede finalizar en el destino configurado. |
 
 ## Comprobaciones técnicas
 
@@ -34,4 +37,4 @@ Versión base: eMule Community 0.72a. Esta lista **no implica pruebas manuales r
 
 ## Criterio de aceptación
 
-Compilación x64 correcta **y** QA-01 a QA-09 comprobados manualmente. QA-10 permanece como limitación expresamente conocida hasta implementarla.
+Compilación x64 correcta **y** QA-01 a QA-13 comprobados manualmente. QA-10 a QA-13 son objetivos del cambio, **no pruebas realizadas**. Si se desconecta el volumen, no es posible recrear físicamente la carpeta hasta recuperarlo; verificar que eMule mantiene los datos temporales y permite reintentar la finalización.
