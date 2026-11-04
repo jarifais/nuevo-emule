@@ -1,0 +1,98 @@
+name: Importar eMule Community 0.72a y validar mejora
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/bootstrap-emule.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    if: github.repository == 'jarifais/nuevo-emule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descargar fuentes originales y verificar SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f srchybrid/SearchListCtrl.cpp; then
+            echo "El codigo ya esta importado. No se sobrescribira."
+            exit 0
+          fi
+
+          mkdir -p "$RUNNER_TEMP/emule_sources"
+          curl -fL --retry 3 --output "$RUNNER_TEMP/eMule0.72a-Sources.zip" \
+            "https://github.com/irwir/eMule/releases/download/eMule_v0.72a-community/eMule0.72a-Sources.zip"
+          echo "7457d2b9b11c7800b79f29579854492ab04888ec55c37d78494cf7900f100f9a  $RUNNER_TEMP/eMule0.72a-Sources.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/eMule0.72a-Sources.zip" -d "$RUNNER_TEMP/emule_sources"
+
+          entry="$(find "$RUNNER_TEMP/emule_sources" -type f -path '*/srchybrid/SearchListCtrl.cpp' -print -quit)"
+          test -n "$entry"
+          source_root="${entry%/srchybrid/SearchListCtrl.cpp}"
+          test -f "$source_root/srchybrid/emule.sln"
+          echo "Fuentes extraidas desde: $source_root"
+          rsync -a --exclude='/.git/' --exclude='/.github/' --exclude='/scripts/' --exclude='/README.md' \
+            "$source_root/" "$GITHUB_WORKSPACE/"
+
+          python3 scripts/apply_download_to_folder.py
+          python3 scripts/apply_download_to_folder.py
+
+          cat > UPSTREAM_SOURCE.txt <<'EOF'
+          Fuente: eMule Community 0.72a
+          Repositorio: https://github.com/irwir/eMule
+          Tag: eMule_v0.72a-community
+          Commit: ac3d52eafd88e9f6d9e0c2204c6dbead18db750b
+          Asset: eMule0.72a-Sources.zip
+          SHA256: 7457d2b9b11c7800b79f29579854492ab04888ec55c37d78494cf7900f100f9a
+          Cambio: Descargar en... (seleccion multiple, categoria automatica persistente)
+          EOF
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f -A
+          if ! git diff --cached --quiet; then
+            git commit -m "feat: importar eMule Community 0.72a con Descargar en"
+            git push origin HEAD:main
+          fi
+
+  compile-windows-x64:
+    needs: import
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Configurar MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Compilar Release x64
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "srchybrid/emule.sln")) { throw "No se importaron las fuentes" }
+          msbuild "srchybrid/emule.sln" /m /p:Configuration=Release /p:Platform=x64 /v:minimal /bl:compilacion.binlog
+          if ($LASTEXITCODE -ne 0) { throw "MSBuild error $LASTEXITCODE" }
+      - name: Subir ejecutable para pruebas
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuevo-emule-0.72a-windows-x64
+          path: |
+            **/emule.exe
+            **/eMule.exe
+          if-no-files-found: warn
+      - name: Guardar diagnostico MSBuild
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostico-compilacion
+          path: compilacion.binlog
+          if-no-files-found: ignore
