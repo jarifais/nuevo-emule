@@ -136,6 +136,7 @@ protected:
 	DWORD		m_dwLastAvailableCommandsCheck;
 	bool		m_bRemainSort;
 	bool		m_availableCommandsDirty;
+	int		m_nVisibleFileCount; // maintained incrementally for frequent AddFile calls
 
 	void HideFile(ListItems::const_iterator ihide);
 	void ShowFile(ListItems::const_iterator ishow);
