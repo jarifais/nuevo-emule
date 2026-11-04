@@ -24,8 +24,8 @@ Versión base: eMule Community 0.72a. Esta lista **no implica pruebas manuales r
 | QA-09 | Utilizar una carpeta de red accesible (UNC). | La selección y el traslado final funcionan, si la red y permisos lo permiten. |
 | QA-10 | Borrar la carpeta de destino tras iniciar una descarga, con el volumen aún conectado. | Al completarse el archivo, eMule recrea la carpeta y guarda allí el archivo; no lo desvía a Incoming. |
 | QA-11 | Borrar varios directorios intermedios del destino, con el volumen aún conectado. | Se recrea el árbol de carpetas antes de mover el archivo completado. |
-| QA-12 | Desconectar el SSD USB o dejar inaccesible un recurso UNC al completar. | El destino configurado no se cambia; se informa del fallo, sin desviar a Incoming ni eliminar el .part por una falsa finalización. |
-| QA-13 | Reiniciar eMule con el destino de categoría temporalmente inaccesible y después restaurarlo. | Category.ini conserva la ruta; cuando vuelve a estar disponible, la descarga puede finalizar en el destino configurado. |
+| QA-12 | Desconectar el SSD USB o dejar inaccesible la unidad de destino al completar. | Se conserva el comportamiento original de eMule: al no poder crear la carpeta, utiliza Incoming; no se modifica la lógica general. |
+| QA-13 | Reiniciar eMule con un destino de categoría inaccesible. | Se conserva la lógica original de carga de categorías y sus rutas alternativas. |
 
 ## Comprobaciones técnicas
 
@@ -37,4 +37,4 @@ Versión base: eMule Community 0.72a. Esta lista **no implica pruebas manuales r
 
 ## Criterio de aceptación
 
-Compilación x64 correcta **y** QA-01 a QA-13 comprobados manualmente. QA-10 a QA-13 son objetivos del cambio, **no pruebas realizadas**. Si se desconecta el volumen, no es posible recrear físicamente la carpeta hasta recuperarlo; verificar que eMule mantiene los datos temporales y permite reintentar la finalización.
+Compilación x64 correcta **y** QA-01 a QA-13 comprobados manualmente. QA-10 a QA-13 son objetivos del cambio, **no pruebas realizadas**. Si se desconecta el volumen, no es posible recrear físicamente la carpeta; verificar que la gestión del caso es idéntica a la de eMule original y que no se pierden archivos temporales.
