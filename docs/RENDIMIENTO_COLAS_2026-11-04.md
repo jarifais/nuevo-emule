@@ -1,0 +1,42 @@
+# Auditoría de rendimiento y robustez — 4 de noviembre de 2026
+
+Estado: cambios implementados en rama de pruebas. **Sin validación funcional en un PC Windows ni resultados de rendimiento medidos**. No fusionar a `main` hasta verificar compilación y regresiones.
+
+## Cambios implementados
+
+1. **Contador de archivos visibles** — `srchybrid/DownloadListCtrl.cpp/.h`.
+   - `AddFile` actualiza el contador de la pestaña visible en lugar de ejecutar `GetFilesCountInCurCat` y recorrer todas las descargas al añadir cada una.
+   - `ShowFile` y `HideFile` mantienen el contador cuando cambia la visibilidad de un archivo.
+   - `ShowFilesCount` conserva un recuento completo para sincronización al cambiar de categoría.
+   - Comprobar especialmente categorías filtradas, cambios de estado, arranque con miles de archivos y eliminación masiva.
+
+2. **Ordenación por prioridad** — `srchybrid/DownloadQueue.cpp/.h`.
+   - Sustituye `HeapSort`, que utilizaba `FindIndex` repetidamente sobre una lista enlazada, por una copia de punteros a `std::vector`, `std::stable_sort` y escritura sobre las mismas posiciones de la lista.
+   - Conserva la precedencia de prioridad de categoría y prioridad del archivo. A igual prioridad entre categorías distintas, introduce un criterio de desempate determinista por índice de categoría para satisfacer el contrato de orden estricto del algoritmo de biblioteca. Los nombres vacíos también se ordenan consistentemente en categorías alfabéticas.
+   - Verificar manualmente la precedencia con archivos de distintas categorías, prioridades y nombres; este desempate puede modificar la disposición anterior de archivos empatados entre categorías.
+
+3. **Mantenimiento de archivos inactivos** — `srchybrid/DownloadQueue.cpp`.
+   - Se mantiene la llamada a `CPartFile::Process` en el ciclo original de 100 ms para archivos activos (sin reducir la cadencia de control de transferencias).
+   - Se limita `StopPausedFile` a aproximadamente una ejecución por segundo para cada archivo no activo: su trabajo habitual es la purga de fuentes tras una hora o la eliminación diferida.
+   - Se calcula `GetStatus` una vez por elemento y ciclo, en lugar de repetirlo.
+   - **Limitación:** la cola completa **todavía se recorre cada 100 ms** para mantener las estadísticas globales; esta mejora reduce el trabajo pesado de los inactivos, pero no elimina ese recorrido. No intentar reescribir el planificador sin una prueba de equivalencia y mediciones.
+
+## Regresiones obligatorias
+
+- Arranque con 0, 1, 1.000, 10.000 y más descargas: comprobar cifra de archivos, pestañas y filtros.
+- Añadir, ocultar, cambiar categoría y eliminar archivos: el contador debe coincidir siempre con el recuento real en cada categoría.
+- Seleccionar un bloque de miles de descargas con Mayús y flecha: no debe bloquearse el diálogo ni perderse la selección.
+- Varias categorías y prioridades, incluida la ordenación alfabética y nombres iguales/vacíos.
+- Descargas activas: comparar periodicidad de progreso, velocidad, fuentes, límites y activación con el original.
+- Archivos pausados o con error: purga de fuentes tras una hora y eliminación diferida correcta.
+- Comprobar `.part` y `.part.met` tras cierres normales, fallos simulados y recuperación.
+- Verificar Release x64 en GitHub Actions y ejecutar una prueba de rendimiento real antes de afirmar mejora de velocidad o memoria.
+
+## Próximas investigaciones (no implementadas aquí)
+
+- Eliminar el barrido completo por ciclo mediante una lista activa mantenida con eventos o invalidación segura y estadísticas incrementales. Riesgo: omitir transiciones a activo o conservar punteros a archivos borrados. Requiere pruebas reproducibles.
+- Evitar búsquedas repetidas `FindItem` en la lista visual de descargas y su coste con fuentes expandidas.
+- Reducir consultas repetidas de espacio libre si varias descargas comparten la misma unidad; confirmar primero efectos de caché y eventos de disco.
+- Instrumentar latencia de GUI, lecturas/escrituras, uso de memoria, cola de I/O y recuperación de `.part.met`.
+
+**No se modifican protocolos eD2k/Kad, límites de red, formato de archivos parciales ni política general de carpetas.**
