@@ -18,7 +18,7 @@ def patch(name: str, old: str, new: str) -> None:
     before = old.encode("ascii")
     after = new.encode("ascii")
 
-    if after in content and before not in content:
+    if after in content:
         print(f"ALREADY {name}")
         return
     count = content.count(before)
