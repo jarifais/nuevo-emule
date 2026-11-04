@@ -2794,10 +2794,11 @@ BOOL CPartFile::PerformFileComplete()
 	const CString &strPartfilename(RemoveFileExtension(m_fullname));
 	_tcscpy(newfilename, (LPCTSTR)StripInvalidFilenameChars(newfilename));
 
-	CString indir;
-	if (::PathFileExists(thePrefs.GetCategory(GetCategory())->strIncomingPath))
-		indir = thePrefs.GetCategory(GetCategory())->strIncomingPath;
-	else
+	// Keep explicit category destinations even when temporarily offline.
+	// MoveFileWithProgress reports a recoverable completion error instead of
+	// silently placing the file in the global Incoming directory.
+	CString indir(thePrefs.GetCategory(GetCategory())->strIncomingPath);
+	if (GetCategory() == 0 && !::PathFileExists(indir))
 		indir = thePrefs.GetMuleDirectory(EMULE_INCOMINGDIR);
 	ASSERT(indir.Right(1) == _T("\\"));
 	// close permanent handle
@@ -2826,7 +2827,8 @@ BOOL CPartFile::PerformFileComplete()
 
 		int namecount = 0;
 		//search for matching ()s and check if it contains a number
-		if ((ext != newfilename) && (_tcsrchr(newfilename, _T(')')) + 1 == last)) {
+		TCHAR *closingParen = _tcsrchr(newfilename, _T(')'));
+		if ((ext != newfilename) && closingParen != NULL && closingParen + 1 == last) {
 			TCHAR *first = _tcsrchr(newfilename, _T('('));
 			if (first != NULL) {
 				++first;
@@ -2966,7 +2968,7 @@ void CPartFile::PerformFileCompleteEnd(DWORD dwResult)
 		thePrefs.Add2DownSessionCompletedFiles();
 		thePrefs.SaveCompletedDownloadsStat();
 
-		// 05-Jän-2004 [bc]: ed2k and Kad are already full of totally wrong and/or not properly
+		// 05-JÃ¤n-2004 [bc]: ed2k and Kad are already full of totally wrong and/or not properly
 		// attached meta data. Take the chance to clean any available meta data tags and provide
 		// only tags which were determined by us.
 		UpdateMetaDataTags();
@@ -4569,7 +4571,7 @@ bool CPartFile::GetNextRequestedBlock(CUpDownClient *sender, Requested_Block_Str
 	//      completed before starting to download an other one.
 	//
 	// The frequency criterion defines 4 grades of availability: very rare, rare, almost rare,
-	// and common. Inside each grade, the criteria have a specific ‘weight’, used
+	// and common. Inside each grade, the criteria have a specific Â‘weightÂ’, used
 	// to calculate the priority of chunks. The chunk(s) with the highest
 	// priority (highest=0, lowest=0xffff) is/are selected first.
 	//
