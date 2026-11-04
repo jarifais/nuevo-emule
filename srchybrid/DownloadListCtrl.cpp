@@ -77,6 +77,7 @@ CDownloadListCtrl::CDownloadListCtrl()
 	, m_dwLastAvailableCommandsCheck()
 	, m_bRemainSort()
 	, m_availableCommandsDirty(true)
+	, m_nVisibleFileCount(0)
 {
 	SetGeneralPurposeFind(true);
 	SetSkinKey(_T("DownloadsLv"));
@@ -243,10 +244,13 @@ void CDownloadListCtrl::AddFile(CPartFile *toadd)
 	ASSERT(m_ListItems.find(toadd) == m_ListItems.end());
 	m_ListItems.emplace(toadd, newitem);
 
-	if (toadd->CheckShowItemInGivenCat(m_curTab))
+	if (toadd->CheckShowItemInGivenCat(m_curTab)) {
 		InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)newitem);
-
-	ShowFilesCount();
+		++m_nVisibleFileCount;
+	}
+	// AddFile is called once per recovered download. Avoid rescanning the entire
+	// queue on each insertion (quadratic work at 10,000+ downloads).
+	theApp.emuledlg->transferwnd->UpdateFilesCount(m_nVisibleFileCount);
 }
 
 void CDownloadListCtrl::AddSource(CPartFile *owner, CUpDownClient *source, bool notavailable)
@@ -2089,7 +2093,8 @@ CString CDownloadListCtrl::GetFileItemDisplayText(const CPartFile *lpPartFile, i
 
 void CDownloadListCtrl::ShowFilesCount()
 {
-	theApp.emuledlg->transferwnd->UpdateFilesCount(GetFilesCountInCurCat());
+	m_nVisibleFileCount = GetFilesCountInCurCat();
+	theApp.emuledlg->transferwnd->UpdateFilesCount(m_nVisibleFileCount);
 }
 
 void CDownloadListCtrl::ShowSelectedFileDetails()
@@ -2154,6 +2159,8 @@ void CDownloadListCtrl::UpdateCurrentCategoryView(CPartFile *thisfile)
 				HideFile(it);
 		}
 	}
+	// Category membership can change without adding/removing an entry.
+	ShowFilesCount();
 }
 
 void CDownloadListCtrl::ChangeCategory(int newsel)
