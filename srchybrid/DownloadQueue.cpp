@@ -16,6 +16,8 @@
 //Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "stdafx.h"
 #include <io.h>
+#include <algorithm>
+#include <vector>
 #include "emule.h"
 #include "UpDownClient.h"
 #include "DownloadQueue.h"
@@ -922,54 +924,26 @@ void CDownloadQueue::StopUDPRequests()
 	m_iSearchedServers = 0;
 }
 
-bool CDownloadQueue::CompareParts(POSITION pos1, POSITION pos2)
-{
-	CPartFile *file1 = filelist.GetAt(pos1);
-	CPartFile *file2 = filelist.GetAt(pos2);
-	return CPartFile::RightFileHasHigherPrio(file1, file2);
-}
-
-void CDownloadQueue::SwapParts(POSITION pos1, POSITION pos2)
-{
-	CPartFile *file1 = filelist.GetAt(pos1);
-	CPartFile *file2 = filelist.GetAt(pos2);
-	filelist.SetAt(pos1, file2);
-	filelist.SetAt(pos2, file1);
-}
-
-void CDownloadQueue::HeapSort(UINT first, UINT last)
-{
-	UINT r;
-	POSITION pos1 = filelist.FindIndex(first);
-	for (r = first; !(r & (UINT)INT_MIN) && (r << 1) < last;) {
-		UINT r2 = (r << 1) + 1;
-		POSITION pos2 = filelist.FindIndex(r2);
-		if (r2 != last) {
-			POSITION pos3 = pos2;
-			filelist.GetNext(pos3);
-			if (!CompareParts(pos2, pos3)) {
-				pos2 = pos3;
-				++r2;
-			}
-		}
-		if (CompareParts(pos1, pos2))
-			break;
-		SwapParts(pos1, pos2);
-		r = r2;
-		pos1 = pos2;
-	}
-}
-
 void CDownloadQueue::SortByPriority()
 {
-	UINT n = (UINT)filelist.GetCount();
-	if (!n)
-		return;
-	for (UINT i = n / 2; i--;)
-		HeapSort(i, n - 1);
-	for (UINT i = n; --i;) {
-		SwapParts(filelist.FindIndex(0), filelist.FindIndex(i));
-		HeapSort(0, i - 1);
+	// The queue is a linked list. FindIndex() walks it from the beginning,
+	// so using it throughout heap sort makes large queues unnecessarily slow.
+	// Sort pointers in an indexed buffer, then write them back to the
+	// existing list without replacing it or changing its external semantics.
+	std::vector<CPartFile*> ordered;
+	ordered.reserve(static_cast<size_t>(filelist.GetCount()));
+	for (POSITION pos = filelist.GetHeadPosition(); pos != NULL;)
+		ordered.push_back(filelist.GetNext(pos));
+
+	std::stable_sort(ordered.begin(), ordered.end(), [](CPartFile *left, CPartFile *right) {
+		return CPartFile::RightFileHasHigherPrio(right, left);
+	});
+
+	POSITION pos = filelist.GetHeadPosition();
+	for (size_t i = 0; i < ordered.size(); ++i) {
+		POSITION current = pos;
+		filelist.GetNext(pos);
+		filelist.SetAt(current, ordered[i]);
 	}
 }
 
