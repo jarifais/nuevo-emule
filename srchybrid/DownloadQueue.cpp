@@ -391,9 +391,14 @@ void CDownloadQueue::Process()
 	theStats.m_fGlobalDone = 0;
 	theStats.m_fGlobalSize = 0;
 	theStats.m_dwOverallStatus = 0;
-	//file list is already sorted by prio, therefore I removed all the extra loops.
+	// Active transfers retain their original 100-ms scheduling cadence.
+	// Paused/error/completed files only need periodic maintenance (hourly
+	// source purge and deferred deletion), not ten StopPausedFile calls/sec.
+	// Keep per-tick global statistics unchanged for existing GUI consumers.
+	const bool maintainInactiveFiles = m_udcounter >= 10;
 	for (POSITION pos = filelist.GetHeadPosition(); pos != NULL;) {
 		CPartFile *cur_file = filelist.GetNext(pos);
+		const EPartFileStatus fileStatus = cur_file->GetStatus();
 
 		// maintain global download stats
 		theStats.m_fGlobalDone += (float)cur_file->GetCompletedSize();
@@ -401,13 +406,13 @@ void CDownloadQueue::Process()
 
 		if (cur_file->GetTransferringSrcCount() > 0)
 			theStats.m_dwOverallStatus |= STATE_DOWNLOADING;
-		if (cur_file->GetStatus() == PS_ERROR)
+		if (fileStatus == PS_ERROR)
 			theStats.m_dwOverallStatus |= STATE_ERROROUS;
 
-		if (inSet(cur_file->GetStatus(), PS_READY, PS_EMPTY))
+		if (inSet(fileStatus, PS_READY, PS_EMPTY))
 			datarateX += cur_file->Process(factor, m_udcounter);
-		else
-			cur_file->StopPausedFile(); //also drop sources for paused and stopped files
+		else if (maintainInactiveFiles)
+			cur_file->StopPausedFile();
 	}
 
 	average_dr_hist.AddTail(TransferredData{datarateX, curTick});
