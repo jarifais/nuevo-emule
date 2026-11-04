@@ -9,6 +9,7 @@
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/ssl_cache.h"
 #include "mbedtls/ssl_ticket.h"
+#include "psa/crypto.h"
 #include "TLSthreading.h"
 
 #ifdef _DEBUG
@@ -498,11 +499,14 @@ int StartSSL()
 	mbedtls_pk_init(&pkey);
 	mbedtls_ssl_cache_init(&cache);
 	mbedtls_ssl_ticket_init(&ticket_ctx);
+	// Mbed TLS 4.x file parsing expects narrow, null-terminated paths.
+	const CStringA certPath(thePrefs.GetWebCertPath());
+	const CStringA keyPath(thePrefs.GetWebKeyPath());
 	int ret = (int)psa_crypto_init();
 	if (!ret) { // PSA_SUCCESS is 0
-		ret = mbedtls_x509_crt_parse_file(&srvcert, thePrefs.GetWebCertPath());
+		ret = mbedtls_x509_crt_parse_file(&srvcert, certPath.GetString());
 		if (!ret) {
-			ret = mbedtls_pk_parse_keyfile(&pkey, thePrefs.GetWebKeyPath(), NULL);
+			ret = mbedtls_pk_parse_keyfile(&pkey, keyPath.GetString(), NULL);
 			if (!ret) {
 				ret = mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
 				if (!ret) {
@@ -522,8 +526,13 @@ int StartSSL()
 		DebugLogError(_T("Web Interface start failed: %s"), (LPCTSTR)SSLerror(ret));
 	else {
 		unsigned char fingerprint[PSA_HASH_LENGTH(PSA_ALG_SHA_1)];
-		mbedtls_sha1(srvcert.raw.p, srvcert.raw.len, fingerprint);
-		DebugLog(_T("Loaded certificate: %s"), (LPCTSTR)GetCertHash(fingerprint, (int)(sizeof fingerprint)));
+		size_t fingerprintLength = 0;
+		const psa_status_t hashResult = psa_hash_compute(PSA_ALG_SHA_1,
+			srvcert.raw.p, srvcert.raw.len, fingerprint, sizeof fingerprint, &fingerprintLength);
+		if (hashResult == PSA_SUCCESS)
+			DebugLog(_T("Loaded certificate: %s"), (LPCTSTR)GetCertHash(fingerprint, (int)fingerprintLength));
+		else
+			DebugLogError(_T("Could not calculate certificate fingerprint (PSA error %ld)"), (long)hashResult);
 	}
 	return ret;
 }
