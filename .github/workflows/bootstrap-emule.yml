@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - .github/workflows/bootstrap-emule.yml
+      - '.github/workflows/bootstrap-emule.yml'
+      - 'srchybrid/**'
+      - 'scripts/**'
   workflow_dispatch:
 
 permissions:
@@ -139,7 +141,7 @@ jobs:
           path: |
             **/emule.exe
             **/eMule.exe
-          if-no-files-found: warn
+          if-no-files-found: error
       - name: Guardar diagnostico MSBuild
         if: always()
         uses: actions/upload-artifact@v4
