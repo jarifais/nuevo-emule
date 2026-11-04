@@ -44,6 +44,7 @@
 #include "UserMsgs.h"
 #include "SearchResultsWnd.h"
 #include "TransferWnd.h"
+#include "TransferDlg.h"
 #include "MediaInfo.h"
 
 #ifdef _DEBUG
