@@ -2159,8 +2159,8 @@ void CDownloadListCtrl::UpdateCurrentCategoryView(CPartFile *thisfile)
 				HideFile(it);
 		}
 	}
-	// Category membership can change without adding/removing an entry.
-	ShowFilesCount();
+	// Visibility changes are tracked incrementally by ShowFile/HideFile.
+	theApp.emuledlg->transferwnd->UpdateFilesCount(m_nVisibleFileCount);
 }
 
 void CDownloadListCtrl::ChangeCategory(int newsel)
@@ -2195,7 +2195,8 @@ void CDownloadListCtrl::HideFile(ListItems::const_iterator ihide)
 		find.lParam = (LPARAM)it->second;
 		int iItem = FindItem(&find);
 		if (iItem >= 0) {
-			DeleteItem(iItem);
+			if (DeleteItem(iItem))
+				--m_nVisibleFileCount;
 			return;
 		}
 	}
@@ -2209,8 +2210,8 @@ void CDownloadListCtrl::ShowFile(ListItems::const_iterator ishow)
 	LVFINDINFO find;
 	find.flags = LVFI_PARAM;
 	find.lParam = (LPARAM)updateItem;
-	if (FindItem(&find) == -1)
-		InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)updateItem);
+	if (FindItem(&find) == -1 && InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)updateItem) >= 0)
+		++m_nVisibleFileCount;
 }
 
 void CDownloadListCtrl::GetDisplayedFiles(CArray<CPartFile*> &list)
