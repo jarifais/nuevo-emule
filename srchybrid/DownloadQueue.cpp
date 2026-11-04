@@ -936,7 +936,25 @@ void CDownloadQueue::SortByPriority()
 		ordered.push_back(filelist.GetNext(pos));
 
 	std::stable_sort(ordered.begin(), ordered.end(), [](CPartFile *left, CPartFile *right) {
-		return CPartFile::RightFileHasHigherPrio(right, left);
+		const UINT leftCat = left->GetCategory();
+		const UINT rightCat = right->GetCategory();
+		const Category_Struct *leftCategory = thePrefs.GetCategory(leftCat);
+		const Category_Struct *rightCategory = thePrefs.GetCategory(rightCat);
+		if (leftCategory->prio != rightCategory->prio)
+			return leftCategory->prio > rightCategory->prio;
+		if (left->GetDownPriority() != right->GetDownPriority())
+			return left->GetDownPriority() > right->GetDownPriority();
+		// The original alphabetical tie-break only applies within a category.
+		// Different categories with equal priorities were incomparable, which
+		// violates std::stable_sort's strict-weak-order requirement. Order such
+		// ties consistently by category index; keep equal items stable.
+		if (leftCat != rightCat)
+			return leftCat < rightCat;
+		if (leftCat != 0 && leftCategory->downloadInAlphabeticalOrder
+			&& thePrefs.IsExtControlsEnabled()
+			&& !left->GetFileName().IsEmpty() && !right->GetFileName().IsEmpty())
+			return left->GetFileName().CompareNoCase(right->GetFileName()) < 0;
+		return false;
 	});
 
 	POSITION pos = filelist.GetHeadPosition();
