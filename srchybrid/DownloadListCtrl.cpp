@@ -1672,12 +1672,25 @@ void CDownloadListCtrl::SetStyle()
 void CDownloadListCtrl::OnListModified(LPNMHDR pNMHDR, LRESULT* /*pResult*/)
 {
 	LPNMLISTVIEW pNMListView = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
-
-	//this works because 'true' equals 1, and 'false' equals 0
-	int notLast = static_cast<int>(pNMListView->iItem + 1 != GetItemCount());
-	int notFirst = static_cast<int>(pNMListView->iItem != 0);
-	RedrawItems(pNMListView->iItem - notFirst, pNMListView->iItem + notLast);
 	m_availableCommandsDirty = true;
+
+	// The common control already repaints state-only selection/focus changes.
+	// Redrawing neighbouring rows for every Shift+Arrow selection update adds
+	// avoidable UI work when a download queue contains thousands of entries.
+	if (pNMHDR->code == LVN_ITEMCHANGED
+		&& pNMListView->uChanged == LVIF_STATE
+		&& ((pNMListView->uNewState ^ pNMListView->uOldState)
+			& ~(LVIS_SELECTED | LVIS_FOCUSED)) == 0)
+		return;
+
+	// LVN_ITEMCHANGED may report iItem == -1 for a whole-list change.
+	// Never pass an invalid or inverted range to RedrawItems.
+	const int itemCount = GetItemCount();
+	const int item = pNMListView->iItem;
+	if (item < 0 || item >= itemCount)
+		return;
+	RedrawItems(item > 0 ? item - 1 : item,
+		item + 1 < itemCount ? item + 1 : item);
 }
 
 int CDownloadListCtrl::Compare(const CPartFile *file1, const CPartFile *file2, LPARAM lParamSort)
