@@ -40,3 +40,18 @@ Estado: cambios implementados en rama de pruebas. **Sin validación funcional en
 - Instrumentar latencia de GUI, lecturas/escrituras, uso de memoria, cola de I/O y recuperación de `.part.met`.
 
 **No se modifican protocolos eD2k/Kad, límites de red, formato de archivos parciales ni política general de carpetas.**
+
+## Sesión siguiente — jueves 5 de noviembre de 2026
+
+**Instrucción del usuario:** continuar por orden de mayor a menor mejora potencial. Empezar por **prioridad 1: interfaz y selección masiva**. No pasar a otra área sin completar primero la revisión de esa prioridad. No depender de un PC local disponible para avanzar; no hacer seguimiento de GitHub Actions por iniciativa propia.
+
+Orden de trabajo acordado (impacto estimado, todavía no medido):
+1. **Interfaz y selección masiva:** inspeccionar `CDownloadListCtrl` y otras vistas; eliminar `FindItem` repetidos, redibujados innecesarios y operaciones que escalen mal con más de 10.000 descargas y fuentes expandidas. La primera mitigación de `OnListModified` ya está en esta rama; no repetirla. Proteger selección, foco y ordenación. **Primera tarea de mañana.**
+2. **CPU y planificador:** investigar el barrido de todas las descargas cada 100 ms, sin cambiar el procesamiento de descargas activas ni saltar eventos. Ya se redujo a 1 Hz el mantenimiento de archivos inactivos; queda pendiente el barrido de estadísticas.
+3. **Acceso a disco y archivos temporales:** analizar operaciones y consultas redundantes, sin alterar integridad ni durabilidad.
+4. **Robustez y recuperación:** mejorar gestión de fallos y seguridad de `.part` y `.part.met`.
+5. **Memoria:** revisar asignaciones y estructuras de archivos y fuentes a gran escala.
+6. **Búsqueda interna por identificador:** evaluar índices para evitar búsquedas lineales repetidas.
+
+Requisitos de trabajo: cambios acotados en la rama `fix/partfile-safety-2026-11-04`, mantener `main` intacta; no romper funciones que ya trabajan correctamente; diferenciar hallazgos confirmados por lectura de código de mejoras que requieren benchmark; conservar descargas y formatos `.part/.part.met`. El usuario ha indicado dejar esta sesión cerrada y **reanudar mañana**, sin trabajo adicional ni promesas de trabajo asíncrono.
+
