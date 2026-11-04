@@ -106,11 +106,22 @@ jobs:
           if (-not $xml.Contains("emulebb-zlib")) { throw "No coincide el ancla de id3lib" }
           [IO.File]::WriteAllText($project, $xml.Replace("emulebb-zlib", "zlib"))
 
-      - name: Instalar generador Python de Mbed TLS
+      - name: Fijar Python para Mbed TLS
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          architecture: x64
+
+      - name: Instalar y verificar generador Python de Mbed TLS
         shell: pwsh
         run: |
-          python -m pip install --disable-pip-version-check "jsonschema==4.25.1"
-          if ($LASTEXITCODE -ne 0) { throw "No se pudo instalar jsonschema" }
+          $ErrorActionPreference = "Stop"
+          python -c "import sys; print('python:', sys.executable)"
+          python3 -c "import sys; print('python3:', sys.executable)"
+          python3 -m pip install --disable-pip-version-check "jsonschema==4.25.1"
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo instalar jsonschema en python3" }
+          python3 -c "import jsonschema; print('jsonschema disponible')"
+          if ($LASTEXITCODE -ne 0) { throw "jsonschema no esta disponible en python3" }
 
       - name: Configurar MSBuild
         uses: microsoft/setup-msbuild@v2
