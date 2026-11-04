@@ -129,7 +129,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "srchybrid/emule.sln")) { throw "No se importaron las fuentes" }
-          msbuild "srchybrid/emule.sln" /m /p:Configuration=Release /p:Platform=x64 /v:minimal /bl:compilacion.binlog
+          msbuild "srchybrid/emule.sln" /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /v:minimal /bl:compilacion.binlog
           if ($LASTEXITCODE -ne 0) { throw "MSBuild error $LASTEXITCODE" }
       - name: Subir ejecutable para pruebas
         if: success()
