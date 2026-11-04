@@ -18,6 +18,7 @@
 #include <io.h>
 #include <sys/stat.h>
 #include <winioctl.h>
+#include <shlobj.h> // SHCreateDirectoryEx: create missing destination trees
 #ifdef _DEBUG
 #include "DebugHelpers.h"
 #endif
@@ -2798,9 +2799,24 @@ BOOL CPartFile::PerformFileComplete()
 	// MoveFileWithProgress reports a recoverable completion error instead of
 	// silently placing the file in the global Incoming directory.
 	CString indir(thePrefs.GetCategory(GetCategory())->strIncomingPath);
-	if (GetCategory() == 0 && !::PathFileExists(indir))
+	if (GetCategory() == 0)
 		indir = thePrefs.GetMuleDirectory(EMULE_INCOMINGDIR);
 	ASSERT(indir.Right(1) == _T("\\"));
+
+	// Validate only at file completion, not on every block write. Recreate a
+	// deleted destination (including missing intermediate directories) before
+	// moving the completed .part file. Do not redirect custom categories to
+	// Incoming: a disconnected USB disk or unavailable share must remain an
+	// explicit, recoverable completion error instead of silently misfiling data.
+	if (!::PathIsDirectory(indir)) {
+		CString createPath(indir);
+		if (!::PathIsRoot(createPath))
+			createPath.TrimRight(_T("\\"));
+		const int createResult = ::SHCreateDirectoryEx(NULL, createPath, NULL);
+		if (!::PathIsDirectory(indir))
+			theApp.QueueLogLine(true, _T("Cannot recreate download destination \"%s\": %s"),
+				(LPCTSTR)indir, (LPCTSTR)GetErrorMessage(createResult));
+	}
 	// close permanent handle
 	try {
 		if ((HANDLE)m_hpartfile != INVALID_HANDLE_VALUE)
