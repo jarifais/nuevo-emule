@@ -64,7 +64,7 @@ jobs:
 
   compile-windows-x64:
     needs: import
-    runs-on: windows-2025-vs2026
+    runs-on: windows-2022
     timeout-minutes: 45
     permissions:
       contents: read
@@ -79,6 +79,11 @@ jobs:
           function Get-Dependency([string]$name, [string]$branch, [string]$expected, [string]$relative, [string]$target) {
             $work = Join-Path $env:RUNNER_TEMP ("dep-" + $name)
             git clone --quiet --depth 1 --branch $branch ("https://github.com/emulebb/emulebb-" + $name + ".git") $work
+            if ($LASTEXITCODE -ne 0) { throw "Error descargando $name" }
+            if ($name -eq "mbedtls") {
+              git -C $work submodule update --init --recursive --depth 1
+              if ($LASTEXITCODE -ne 0) { throw "Error descargando submodulos de MbedTLS" }
+            }
             if ($LASTEXITCODE -ne 0) { throw "Error descargando $name" }
             $commit = (git -C $work rev-parse HEAD).Trim()
             if ($commit -ne $expected) { throw "SHA no coincide para $name; esperaba $expected y obtuvo $commit" }
@@ -95,6 +100,12 @@ jobs:
           Get-Dependency "resizablelib" "ResizableLib-bebab50-emule" "a7b01a31296b7fe2ed3331171e126ebd9cb1652a" "ResizableLib" "ResizableLib"
           Get-Dependency "zlib" "zlib-v1.3.2-emule" "31fd978c8b2cf375b3935a8279bc599cc07e2a6a" "." "zlib"
           Get-Dependency "mbedtls" "mbedtls-v4.1.0-emule" "4f8ce00444e273babc61d647639e180e5aed56f2" "." "mbedtls"
+          # id3lib vendorizado en emulebb resuelve zlib como emulebb-zlib;
+          # este proyecto conserva los nombres de carpetas de la solucion oficial.
+          $project = Join-Path $env:GITHUB_WORKSPACE "id3lib\libprj\id3lib.vcxproj"
+          $xml = [IO.File]::ReadAllText($project)
+          if (-not $xml.Contains("emulebb-zlib")) { throw "No coincide el ancla de id3lib" }
+          [IO.File]::WriteAllText($project, $xml.Replace("emulebb-zlib", "zlib"))
 
       - name: Configurar MSBuild
         uses: microsoft/setup-msbuild@v2
