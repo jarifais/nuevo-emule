@@ -1,0 +1,7 @@
+Fuente: eMule Community 0.72a
+Repositorio: https://github.com/irwir/eMule
+Tag: eMule_v0.72a-community
+Commit: ac3d52eafd88e9f6d9e0c2204c6dbead18db750b
+Asset: eMule0.72a-Sources.zip
+SHA256: 7457d2b9b11c7800b79f29579854492ab04888ec55c37d78494cf7900f100f9a
+Cambio: Descargar en... (seleccion multiple, categoria automatica persistente)
