@@ -17,6 +17,7 @@
 #include "stdafx.h"
 #include <share.h>
 #include <iphlpapi.h>
+#include <shlobj.h> // SHCreateDirectoryEx: restore missing category paths
 #include "emule.h"
 #include "Preferences.h"
 #include "Opcodes.h"
@@ -2491,10 +2492,16 @@ void CPreferences::LoadCats()
 		if (i != 0) { // All category
 			newcat->strIncomingPath = ini.GetStringUTF8(_T("Incoming"));
 			MakeFoldername(newcat->strIncomingPath);
-			if (!IsShareableDirectory(newcat->strIncomingPath)
-				|| (!::PathFileExists(newcat->strIncomingPath) && !::CreateDirectory(newcat->strIncomingPath, 0)))
-			{
+			if (newcat->strIncomingPath.IsEmpty() || !IsShareableDirectory(newcat->strIncomingPath)) {
 				newcat->strIncomingPath = GetMuleDirectory(EMULE_INCOMINGDIR);
+			} else if (!::PathIsDirectory(newcat->strIncomingPath)) {
+				// Keep the configured destination if the disk/share is temporarily
+				// unavailable. A failed directory creation must not silently
+				// rewrite the category to the global Incoming folder.
+				CString createPath(newcat->strIncomingPath);
+				if (!::PathIsRoot(createPath))
+					createPath.TrimRight(_T("\\"));
+				::SHCreateDirectoryEx(NULL, createPath, NULL);
 			}
 		} else
 			newcat->strIncomingPath.Empty();
