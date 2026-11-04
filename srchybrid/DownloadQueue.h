@@ -159,9 +159,6 @@ protected:
 	bool	SendGlobGetSourcesUDPPacket(CSafeMemFile &data, bool bExt2Packet, uint32 nFiles, uint32 nIncludedLargeFiles);
 
 private:
-	bool	CompareParts(POSITION pos1, POSITION pos2);
-	void	SwapParts(POSITION pos1, POSITION pos2);
-	void	HeapSort(UINT first, UINT last);
 	CTypedPtrList<CPtrList, CPartFile*> filelist;
 	CTypedPtrList<CPtrList, CPartFile*> m_localServerReqQueue;
 
