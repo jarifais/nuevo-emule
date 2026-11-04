@@ -72,6 +72,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - name: Obtener dependencias C++ con commits fijados
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          function Get-Dependency([string]$name, [string]$branch, [string]$expected, [string]$relative, [string]$target) {
+            $work = Join-Path $env:RUNNER_TEMP ("dep-" + $name)
+            git clone --quiet --depth 1 --branch $branch ("https://github.com/emulebb/emulebb-" + $name + ".git") $work
+            if ($LASTEXITCODE -ne 0) { throw "Error descargando $name" }
+            $commit = (git -C $work rev-parse HEAD).Trim()
+            if ($commit -ne $expected) { throw "SHA no coincide para $name; esperaba $expected y obtuvo $commit" }
+            $source = if ($relative -eq ".") { $work } else { Join-Path $work $relative }
+            if (-not (Test-Path $source)) { throw "Ruta de dependencia inexistente: $source" }
+            $dest = Join-Path $env:GITHUB_WORKSPACE $target
+            if (Test-Path $dest) { throw "Destino de dependencia ya presente: $dest" }
+            Copy-Item -LiteralPath $source -Destination $dest -Recurse -Force
+            Write-Host "$name $commit verificado"
+          }
+          Get-Dependency "cryptopp" "CRYPTOPP_8_4_0-pristine" "5279c7a811a97b574a839ea89b4c30ad337e6675" "." "cryptopp"
+          Get-Dependency "id3lib" "id3lib-v3.9.1-emule" "fc66770df4ec3309fb4acb2ea570bf940f5c96eb" "." "id3lib"
+          Get-Dependency "miniupnp" "miniupnpc-master-emule" "4e7a10948004ca2085ac8103e14fc77edb898b4c" "miniupnpc" "miniupnpc"
+          Get-Dependency "resizablelib" "ResizableLib-bebab50-emule" "a7b01a31296b7fe2ed3331171e126ebd9cb1652a" "ResizableLib" "ResizableLib"
+          Get-Dependency "zlib" "zlib-v1.3.2-emule" "31fd978c8b2cf375b3935a8279bc599cc07e2a6a" "." "zlib"
+          Get-Dependency "mbedtls" "mbedtls-v4.1.0-emule" "4f8ce00444e273babc61d647639e180e5aed56f2" "." "mbedtls"
+
       - name: Configurar MSBuild
         uses: microsoft/setup-msbuild@v2
       - name: Compilar Release x64
