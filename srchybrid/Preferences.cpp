@@ -1898,16 +1898,17 @@ void CPreferences::LoadPreferences()
 	if (strNick.IsEmpty() || IsDefaultNick(strNick))
 		SetUserNick(DEFAULT_NICK);
 
-	m_strIncomingDir = ini.GetString(_T("IncomingDir"), _T(""));
+	m_strIncomingDir = IsPortableMode() ? GetDefaultDirectory(EMULE_INCOMINGDIR, true) : ini.GetString(_T("IncomingDir"), _T(""));
 	if (m_strIncomingDir.IsEmpty()) // We want GetDefaultDirectory to also create the folder, so we have to know if we use the default or not
 		m_strIncomingDir = GetDefaultDirectory(EMULE_INCOMINGDIR, true);
 	MakeFoldername(m_strIncomingDir);
 
 	// load tempdir(s) setting
-	CString sTempdirs(ini.GetString(_T("TempDir"), _T("")));
+	CString sTempdirs(IsPortableMode() ? GetDefaultDirectory(EMULE_TEMPDIR, true) : ini.GetString(_T("TempDir"), _T("")));
 	if (sTempdirs.IsEmpty()) // We want GetDefaultDirectory to also create the folder, so we have to know if we use the default or not
 		sTempdirs = GetDefaultDirectory(EMULE_TEMPDIR, true);
-	sTempdirs.AppendFormat(_T("|%s"), (LPCTSTR)ini.GetString(_T("TempDirs")));
+	if (!IsPortableMode())
+		sTempdirs.AppendFormat(_T("|%s"), (LPCTSTR)ini.GetString(_T("TempDirs")));
 
 	for (int iPos = 0; iPos >= 0;) {
 		CString sTmp(sTempdirs.Tokenize(_T("|"), iPos));
@@ -2064,7 +2065,7 @@ void CPreferences::LoadPreferences()
 
 	// Barry - New properties...
 	m_bAutoConnectToStaticServersOnly = ini.GetBool(_T("AutoConnectStaticOnly"), false);
-	autotakeed2klinks = ini.GetBool(_T("AutoTakeED2KLinks"), true);
+	autotakeed2klinks = !IsPortableMode() && ini.GetBool(_T("AutoTakeED2KLinks"), true);
 	addnewfilespaused = ini.GetBool(_T("AddNewFilesPaused"), false);
 	depth3D = ini.GetInt(_T("3DDepth"), 5);
 	m_bEnableMiniMule = ini.GetBool(_T("MiniMule"), true);
@@ -2881,6 +2882,14 @@ CString CPreferences::GetDefaultDirectory(EDefaultDirectory eDirectory, bool bCr
 		CString strSelectedExpansionBaseDirectory(m_astrDefaultDirs[EMULE_EXECUTABLEDIR]);
 		m_nCurrentUserDirMode = 2; // To let us know which "mode" we are using in case we want to switch per options
 
+		// The portable build must never discover or reuse an installed eMule
+		// profile from the registry, LocalAppData or ProgramData. All mutable
+		// files live beside the executable, under the dedicated data folder.
+		if (IsPortableMode()) {
+			strSelectedDataBaseDirectory += _T("data\\");
+			strSelectedConfigBaseDirectory = strSelectedDataBaseDirectory;
+			strSelectedExpansionBaseDirectory = strSelectedDataBaseDirectory;
+		} else {
 		// check if preferences.ini exists already in our default / fallback dir
 		bool bConfigAvailableExecutable = (::PathFileExists(strSelectedConfigBaseDirectory + CONFIGFOLDER PREFINIFILE) != FALSE);
 
@@ -2994,6 +3003,8 @@ CString CPreferences::GetDefaultDirectory(EDefaultDirectory eDirectory, bool bCr
 			}
 		}
 
+		}
+
 		// All the directories (categories also) should have a trailing backslash
 		m_astrDefaultDirs[EMULE_CONFIGDIR] = strSelectedConfigBaseDirectory + CONFIGFOLDER;
 		m_astrDefaultDirs[EMULE_TEMPDIR] = strSelectedDataBaseDirectory + _T("Temp\\");
@@ -3072,6 +3083,9 @@ void CPreferences::SetMuleDirectory(EDefaultDirectory eDirectory, const CString 
 
 void CPreferences::ChangeUserDirMode(int nNewMode)
 {
+	// Portable mode never modifies the installed eMule registry setting.
+	if (IsPortableMode())
+		return;
 	if (m_nCurrentUserDirMode == nNewMode)
 		return;
 	if (nNewMode == 1 && GetWindowsVersion() < _WINVER_VISTA_) {
