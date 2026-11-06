@@ -388,7 +388,7 @@ void CDownloadListCtrl::UpdateItem(void *toupdate)
 			if (updateItem->owner == NULL || !updateItem->owner->srcarevisible)
 				continue;
 		} else {
-			const CPartFile *partfile = static_cast<CPartFile*>(updateItem->value);
+			CPartFile *partfile = static_cast<CPartFile*>(updateItem->value);
 			if (partfile == NULL || !partfile->CheckShowItemInGivenCat(m_curTab))
 				continue;
 		}
