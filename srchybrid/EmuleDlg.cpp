@@ -110,7 +110,9 @@ extern BOOL FirstTimeWizard();
 #define	SYS_TRAY_ICON_COOKIE_FORCE_UPDATE	UINT_MAX
 
 UINT g_uMainThreadId = 0;
-static const UINT UWM_ARE_YOU_EMULE = RegisterWindowMessage(EMULE_GUID);
+// Match Emule.cpp's per-build window discovery identifier.
+static const UINT UWM_ARE_YOU_EMULE = RegisterWindowMessage(
+	CPreferences::IsPortableMode() ? _T("{eMule-nuevo-portable-instance-2026}") : EMULE_GUID);
 
 #ifdef HAVE_WIN7_SDK_H
 static const UINT UWM_TASK_BUTTON_CREATED = RegisterWindowMessage(_T("TaskbarButtonCreated"));
