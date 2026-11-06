@@ -15,6 +15,7 @@
 //along with this program; if not, write to the Free Software
 //Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "stdafx.h"
+#include <unordered_set>
 #include "emule.h"
 #include "DownloadListCtrl.h"
 #include "updownclient.h"
@@ -2167,19 +2168,44 @@ void CDownloadListCtrl::ChangeCategory(int newsel)
 {
 	SetRedraw(false);
 
-	// show the files of the selected category, remove all others
-	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
-		const CtrlItem_Struct *cur_item = it->second;
-		if (cur_item->type == FILE_TYPE)
-			if (static_cast<CPartFile*>(cur_item->value)->CheckShowItemInGivenCat(newsel))
-				ShowFile(it);
-			else
-				HideFile(it);
+	// Keep rows that remain visible and remove rows which no longer belong
+	// to the selected category in a single backwards pass. The old path
+	// called ShowFile/HideFile (which search all visible rows) for each
+	// download: category changes with 10,000 files were quadratic.
+	std::unordered_set<const CtrlItem_Struct*> visibleFiles;
+	for (int i = GetItemCount(); --i >= 0;) {
+		CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(GetItemData(i));
+		if (item == NULL)
+			continue;
+
+		CPartFile *owner = item->type == FILE_TYPE
+			? static_cast<CPartFile*>(item->value) : item->owner;
+		if (owner != NULL && !owner->CheckShowItemInGivenCat(newsel)) {
+			if (item->type == FILE_TYPE)
+				owner->srcarevisible = false;
+			else {
+				item->dwUpdated = 0;
+				item->status.DeleteObject();
+			}
+			DeleteItem(i);
+		} else if (item->type == FILE_TYPE)
+			visibleFiles.insert(item);
 	}
 
-	SetRedraw(true);
+	// Retain existing file rows, including their selection, focus and
+	// expanded sources; append only newly visible files.
+	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
+		const CtrlItem_Struct *item = it->second;
+		if (item->type == FILE_TYPE
+			&& visibleFiles.find(item) == visibleFiles.end()
+			&& static_cast<CPartFile*>(item->value)->CheckShowItemInGivenCat(newsel))
+			InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK,
+				0, 0, 0, (LPARAM)item);
+	}
+
 	m_curTab = newsel;
 	ShowFilesCount();
+	SetRedraw(true);
 }
 
 void CDownloadListCtrl::HideFile(ListItems::const_iterator ihide)
