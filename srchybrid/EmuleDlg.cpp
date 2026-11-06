@@ -446,7 +446,7 @@ BOOL CemuleDlg::OnInitDialog()
 	}
 
 	// set title
-	SetWindowText(_T("eMule v") + theApp.m_strCurVersionLong);
+	SetWindowText((CPreferences::IsPortableMode() ? _T("nuevo-emule PORTABLE v") : _T("eMule v")) + theApp.m_strCurVersionLong);
 
 	// Init taskbar notifier
 	m_wndTaskbarNotifier.CreateWnd(this);
@@ -1139,7 +1139,7 @@ void CemuleDlg::ShowTransferRate(bool bForceAll)
 	}
 	if (IsWindowVisible() && thePrefs.ShowRatesOnTitle()) {
 		CString szBuff;
-		szBuff.Format(_T("(U:%.1f D:%.1f) eMule v%s"), (float)m_uUpDatarate / 1024, (float)m_uDownDatarate / 1024, (LPCTSTR)theApp.m_strCurVersionLong);
+		szBuff.Format(CPreferences::IsPortableMode() ? _T("(U:%.1f D:%.1f) nuevo-emule PORTABLE v%s") : _T("(U:%.1f D:%.1f) eMule v%s"), (float)m_uUpDatarate / 1024, (float)m_uDownDatarate / 1024, (LPCTSTR)theApp.m_strCurVersionLong);
 		SetWindowText(szBuff);
 	}
 	InterlockedExchange8(&m_bMiniUpdate, 1);
