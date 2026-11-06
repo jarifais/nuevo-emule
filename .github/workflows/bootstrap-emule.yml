@@ -202,7 +202,9 @@ jobs:
           Get-FileHash -Algorithm SHA256 $zip | Format-List
           if (-not (Test-Path -LiteralPath $zip)) { throw "ZIP no generado" }
       - name: Publicar ZIP como prerelease de pruebas sin usar almacenamiento de Actions
+        id: publicar_portable
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        continue-on-error: true
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -218,3 +220,12 @@ jobs:
             gh release create $tag $zip --title "Prueba portable x64 $short" --notes "Versión experimental. Compilada, sin validación funcional con descargas reales. Hacer copia de seguridad de .part, .part.met y config antes de usar." --prerelease --target $env:GITHUB_SHA --repo $env:GITHUB_REPOSITORY
           }
           if ($LASTEXITCODE -ne 0) { throw "No se pudo publicar el ZIP portable" }
+
+      - name: Respaldo ZIP portable como artefacto si Releases rechaza permisos
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.publicar_portable.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuevo-emule-portable-windows-x64-${{ github.sha }}
+          path: nuevo-emule-portable-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
