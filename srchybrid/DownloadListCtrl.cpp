@@ -814,42 +814,19 @@ void CDownloadListCtrl::HideSources(CPartFile *toCollapse)
 		return;
 	SetRedraw(false);
 
-	// Sources are grouped immediately after their owning file by AddSource,
-	// ExpandCollapseItem and SortProc. Find the parent once, instead of
-	// scanning every visible download whenever a source tree is collapsed.
-	int iParent = -1;
-	ListItems::const_iterator ownerIt = m_ListItems.find(toCollapse);
-	if (ownerIt != m_ListItems.end()) {
-		LVFINDINFO find;
-		find.flags = LVFI_PARAM;
-		find.lParam = (LPARAM)ownerIt->second;
-		iParent = FindItem(&find);
-	}
-
-	if (iParent >= 0) {
-		// Deleting a child shifts the next child into the same row index.
-		const int iChild = iParent + 1;
-		while (iChild < GetItemCount()) {
-			CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(GetItemData(iChild));
-			if (item == NULL || item->owner != toCollapse)
-				break;
+	// Do not assume that source rows are contiguous: unexpected sort/reorder
+	// states must not leave dangling rows pointing to a hidden or deleted
+	// source. GetItemData is now constant-time in CDownloadListCtrl, so the
+	// comprehensive backwards scan no longer performs linked-list lookups
+	// for every visible row.
+	for (int i = GetItemCount(); --i >= 0;) {
+		CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(GetItemData(i));
+		if (item != NULL && item->owner == toCollapse) {
 			item->dwUpdated = 0;
 			item->status.DeleteObject();
-			DeleteItem(iChild);
-		}
-	} else {
-		// Defensive fallback if the parent is not shown (e.g. a category
-		// update in progress) but source rows are still present.
-		for (int i = GetItemCount(); --i >= 0;) {
-			CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(GetItemData(i));
-			if (item != NULL && item->owner == toCollapse) {
-				item->dwUpdated = 0;
-				item->status.DeleteObject();
-				DeleteItem(i);
-			}
+			DeleteItem(i);
 		}
 	}
-
 	toCollapse->srcarevisible = false;
 	SetRedraw(true);
 }
