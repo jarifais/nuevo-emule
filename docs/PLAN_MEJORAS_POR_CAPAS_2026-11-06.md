@@ -17,8 +17,13 @@
 
 ## Capa 1: avances implementados
 
-- **Cambio de categoría — commit 758a04c:** sustituye un bucle que realizaba `FindItem` en `ShowFile`/`HideFile` por cada descarga por un barrido de filas visibles, una colección temporal de filas conservadas y reinserción exclusiva de archivos nuevos. Reduce complejidad teórica de aproximada O(N·V) a O(N+V), con N archivos y V filas visibles. No se ha medido tiempo de respuesta real.
-- **Contracción de fuentes — commit 08788b8:** localiza una vez el archivo propietario y elimina sus fuentes contiguas, sin examinar todas las filas de la cola. Conserva la exploración completa como respaldo cuando no aparece la fila propietaria.
+- **Cambio de categoría — commit 758a04c:** sustituye las búsquedas `FindItem` repetidas de `ShowFile`/`HideFile` por un barrido de filas visibles y la reinserción exclusiva de archivos nuevos. Se reduce el número de búsquedas; **no es correcto afirmar complejidad global O(N+V)** porque el control base mantiene índices en una lista enlazada y cada `DeleteItem` puede seguir costando O(V).
+- **Contracción de fuentes — commits 08788b8 y 7bc1df5:** la primera optimización asumía fuentes contiguas. Se ha sustituido por un barrido completo y seguro que no deja fuentes huérfanas si el orden cambia; ahora cada lectura de fila usa la consulta directa de Windows.
+- **Lectura de filas — commits 03e3941 y 215b9cc:** `CDownloadListCtrl::GetItemData` consulta los datos de fila de Windows directamente, sin `m_Params.FindIndex`. En compilaciones Debug compara el resultado con el comportamiento original mediante `ASSERT`.
+- **Actualizaciones ocultas — commit 68e157d:** `UpdateItem` evita búsquedas y repintados de archivos fuera de la categoría y de fuentes contraídas.
+- **Eliminación con fuentes — commit 90517d2:** `RemoveFile` retira en dos fases filas y entradas del mapa, evitando búsquedas visuales repetidas y liberando memoria solo después de borrar las filas.
+
+**Estado de validación:** los cambios están implementados en la rama. La compilación del último commit y las pruebas funcionales con dos instancias, 10.000 descargas y selección prolongada aún deben verificarse. Ninguna mejora porcentual está medida. El origen del bloqueo original todavía no se ha diagnosticado con un registro de excepción.
 - Se mantienen las correcciones previas del redibujado de selección y del contador visible; no duplicarlas.
 
 ## Criterios obligatorios de aceptación de la capa 1
