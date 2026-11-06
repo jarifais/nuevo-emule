@@ -22,6 +22,8 @@
 - **Lectura de filas — commits 03e3941 y 215b9cc:** `CDownloadListCtrl::GetItemData` consulta los datos de fila de Windows directamente, sin `m_Params.FindIndex`. En compilaciones Debug compara el resultado con el comportamiento original mediante `ASSERT`.
 - **Actualizaciones ocultas — commit 68e157d:** `UpdateItem` evita búsquedas y repintados de archivos fuera de la categoría y de fuentes contraídas.
 - **Eliminación con fuentes — commit 90517d2:** `RemoveFile` retira en dos fases filas y entradas del mapa, evitando búsquedas visuales repetidas y liberando memoria solo después de borrar las filas.
+- **Desplazamiento y recursos gráficos — commit fc685dc:** `CMuleListCtrl::OnLvnEndScrollList` ya no deja sin liberar el contexto de dibujo obtenido al llegar al final; utiliza `CClientDC` con liberación automática, comprueba el resultado de `GetItemRect` y evita usar el índice `-1` en listas vacías. Es un defecto confirmado por lectura del código, pero **no se puede asegurar que fuera el origen del bloqueo concreto del usuario**.
+- **Pruebas estáticas — siete contratos:** `scripts/test_gui_layer1_contract.py` comprueba las invariantes básicas de las correcciones, incluida la liberación del contexto de dibujo. Deben mantenerse complementadas con MSBuild y pruebas de interfaz en Windows.
 
 **Estado de validación:** los cambios están implementados en la rama. La compilación del último commit y las pruebas funcionales con dos instancias, 10.000 descargas y selección prolongada aún deben verificarse. Ninguna mejora porcentual está medida. El origen del bloqueo original todavía no se ha diagnosticado con un registro de excepción.
 - Se mantienen las correcciones previas del redibujado de selección y del contador visible; no duplicarlas.
