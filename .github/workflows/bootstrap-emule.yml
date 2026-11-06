@@ -2,7 +2,7 @@ name: Importar eMule Community 0.72a y validar mejora
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/partfile-safety-2026-11-04]
     paths:
       - '.github/workflows/bootstrap-emule.yml'
       - 'srchybrid/**'
@@ -74,7 +74,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Obtener dependencias C++ con commits fijados
@@ -137,19 +137,40 @@ jobs:
           if (-not (Test-Path "srchybrid/emule.sln")) { throw "No se importaron las fuentes" }
           msbuild "srchybrid/emule.sln" /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /v:minimal /bl:compilacion.binlog
           if ($LASTEXITCODE -ne 0) { throw "MSBuild error $LASTEXITCODE" }
-      - name: Subir ejecutable para pruebas
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nuevo-emule-0.72a-windows-x64
-          path: |
-            **/emule.exe
-            **/eMule.exe
-          if-no-files-found: error
-      - name: Guardar diagnostico MSBuild
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: diagnostico-compilacion
-          path: compilacion.binlog
-          if-no-files-found: ignore
+      - name: Preparar ZIP portable Windows x64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'srchybrid/x64/Release/emule.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "No se generó emule.exe en $exe" }
+          $dir = Join-Path $env:RUNNER_TEMP 'nuevo-emule-portable'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $dir 'emule.exe')
+          @'
+          eMule Community 0.72a - compilación experimental del repositorio nuevo-emule.
+          Extraer y ejecutar emule.exe. Sin instalador.
+          IMPORTANTE: sin pruebas funcionales sobre una cola real.
+          Antes de usar con descargas existentes, conservar una copia de seguridad
+          de config, Temp, archivos .part y .part.met.
+          '@ | Set-Content -LiteralPath (Join-Path $dir 'LEEME.txt') -Encoding utf8
+          $zip = Join-Path $env:GITHUB_WORKSPACE 'nuevo-emule-portable-windows-x64.zip'
+          Compress-Archive -LiteralPath (Join-Path $dir 'emule.exe'),(Join-Path $dir 'LEEME.txt') -DestinationPath $zip -Force
+          Get-FileHash -Algorithm SHA256 $zip | Format-List
+          if (-not (Test-Path -LiteralPath $zip)) { throw "ZIP no generado" }
+      - name: Publicar ZIP como prerelease de pruebas sin usar almacenamiento de Actions
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $short = $env:GITHUB_SHA.Substring(0,12)
+          $tag = "portable-test-$short"
+          $zip = Join-Path $env:GITHUB_WORKSPACE 'nuevo-emule-portable-windows-x64.zip'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $tag $zip --title "Prueba portable x64 $short" --notes "Versión experimental. Compilada, sin validación funcional con descargas reales. Hacer copia de seguridad de .part, .part.met y config antes de usar." --prerelease --target $env:GITHUB_SHA --repo $env:GITHUB_REPOSITORY
+          }
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo publicar el ZIP portable" }
