@@ -145,16 +145,49 @@ jobs:
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "No se generó emule.exe en $exe" }
           $dir = Join-Path $env:RUNNER_TEMP 'nuevo-emule-portable'
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
-          Copy-Item -LiteralPath $exe -Destination (Join-Path $dir 'emule.exe')
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $dir 'nuevo-emule.exe')
+          # Include an isolated, initially empty profile. Do not ship any
+          # installed user's settings, part files or credentials.
+          foreach ($sub in @('data', 'data/config', 'data/Temp', 'data/Incoming')) {
+            New-Item -ItemType Directory -Path (Join-Path $dir $sub) -Force | Out-Null
+          }
           @'
-          eMule Community 0.72a - compilación experimental del repositorio nuevo-emule.
-          Extraer y ejecutar emule.exe. Sin instalador.
-          IMPORTANTE: sin pruebas funcionales sobre una cola real.
-          Antes de usar con descargas existentes, conservar una copia de seguridad
-          de config, Temp, archivos .part y .part.met.
+          NUEVO EMULE PORTABLE - WINDOWS x64 (PRUEBA EXPERIMENTAL)
+
+          1. Extrae todo el ZIP en una carpeta propia y con permiso de escritura
+             (por ejemplo: Documentos\NuevoEmulePortable).
+          2. Con el eMule habitual ABIERTO, ejecuta nuevo-emule.exe de esta carpeta.
+          3. Deben verse DOS procesos distintos y la nueva ventana indicara PORTABLE.
+          4. Datos y descargas de esta prueba:
+                data\config\
+                data\Temp\
+                data\Incoming\
+
+          No copies aqui el config, Temp ni los .part/.part.met de tu eMule
+          instalado. No modifiques el Incoming ni Temp del programa original.
+          Esta compilacion es experimental y aun requiere pruebas funcionales
+          de seleccion masiva, transferencia y recuperacion de datos.
+          La aplicacion portable no instala nada, no modifica las asociaciones
+          ED2K, ni altera el inicio automatico de la instalacion original.
           '@ | Set-Content -LiteralPath (Join-Path $dir 'LEEME.txt') -Encoding utf8
+          'Fichero de control de carpeta portable: no copiar configuracion del eMule instalado.' |
+            Set-Content -LiteralPath (Join-Path $dir 'data/LEEME-DATOS.txt') -Encoding utf8
+          if (-not (Test-Path (Join-Path $dir 'nuevo-emule.exe'))) { throw 'Falta el ejecutable portable' }
+          if (-not (Test-Path (Join-Path $dir 'data/Temp'))) { throw 'Falta carpeta Temp aislada' }
           $zip = Join-Path $env:GITHUB_WORKSPACE 'nuevo-emule-portable-windows-x64.zip'
-          Compress-Archive -LiteralPath (Join-Path $dir 'emule.exe'),(Join-Path $dir 'LEEME.txt') -DestinationPath $zip -Force
+          Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zip -Force
+          Add-Type -AssemblyName System.IO.Compression
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\\','/') })
+            if ($entries -notcontains 'nuevo-emule.exe' -or
+                $entries -notcontains 'LEEME.txt' -or
+                $entries -notcontains 'data/LEEME-DATOS.txt') {
+              throw "ZIP portable incompleto: $($entries -join ', ')"
+            }
+          } finally {
+            $archive.Dispose()
+          }
           Get-FileHash -Algorithm SHA256 $zip | Format-List
           if (-not (Test-Path -LiteralPath $zip)) { throw "ZIP no generado" }
       - name: Publicar ZIP como prerelease de pruebas sin usar almacenamiento de Actions
