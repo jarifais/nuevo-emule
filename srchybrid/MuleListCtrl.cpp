@@ -1044,16 +1044,18 @@ BOOL CMuleListCtrl::OnChildNotify(UINT message, WPARAM wParam, LPARAM lParam, LR
 //Until a better way was found, clear the mess on EndScroll.
 void CMuleListCtrl::OnLvnEndScrollList(LPNMHDR pNMHDR, LRESULT *pResult)
 {
-	if (reinterpret_cast<LPNMLVSCROLL>(pNMHDR)->dy > 0) { //down scroll only
-		int iLast = GetItemCount() - 1;
-		//if (IsItemVisible(iLast)) { //at least Server 2003 or Vista required
-		if (iLast <= GetTopIndex() + GetCountPerPage()) {
-			RECT rcClient, rcItem;
+	// The common control can leave an unpainted strip when scrolling down
+	// to the bottom. Never request the last item's rectangle for an empty
+	// list and never leak the HDC while repainting the strip.
+	if (reinterpret_cast<LPNMLVSCROLL>(pNMHDR)->dy > 0) {
+		const int iLast = GetItemCount() - 1;
+		if (iLast >= 0 && iLast <= GetTopIndex() + GetCountPerPage()) {
+			CRect rcClient, rcItem;
 			GetClientRect(&rcClient);
-			GetItemRect(iLast, &rcItem, LVIR_BOUNDS);
-			if (rcItem.bottom < rcClient.bottom) {
+			if (GetItemRect(iLast, &rcItem, LVIR_BOUNDS) && rcItem.bottom < rcClient.bottom) {
 				rcClient.top = rcItem.bottom;
-				GetDC()->FillSolidRect(&rcClient, GetBkColor());
+				CClientDC dc(this); // RAII: ReleaseDC in destructor, even on exceptions.
+				dc.FillSolidRect(&rcClient, GetBkColor());
 			}
 		}
 	}
