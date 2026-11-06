@@ -334,34 +334,42 @@ void CDownloadListCtrl::RemoveSource(CUpDownClient *source, CPartFile *owner)
 
 bool CDownloadListCtrl::RemoveFile(const CPartFile *toremove)
 {
-	bool bResult = false;
-	if (theApp.IsClosing())
-		return bResult;
-	// Retrieve all entries matching the File or linked to the file
-	// Remark: The 'asked another files' clients must be removed from here
-	ASSERT(toremove != NULL);
+	if (theApp.IsClosing() || toremove == NULL)
+		return false;
+
+	// Collect all list entries for this file, including A4AF/available sources,
+	// while unlinking them from the multimap. Do not free their memory yet:
+	// the list-view still holds the pointers until its rows are deleted.
+	std::unordered_set<const CtrlItem_Struct*> removeItems;
 	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end();) {
-		const CtrlItem_Struct *delItem = it->second;
-		if (delItem->owner == toremove || delItem->value == (void*)toremove) {
-			// Remove it from the m_ListItems
+		const CtrlItem_Struct *item = it->second;
+		if (item->owner == toremove || item->value == (void*)toremove) {
+			removeItems.insert(item);
 			it = m_ListItems.erase(it);
-
-			// Remove it from the CListCtrl
-			LVFINDINFO find;
-			find.flags = LVFI_PARAM;
-			find.lParam = (LPARAM)delItem;
-			int iItem = FindItem(&find);
-			if (iItem >= 0)
-				DeleteItem(iItem);
-
-			// finally, it could be deleted
-			delete delItem;
-			bResult = true;
 		} else
 			++it;
 	}
+	if (removeItems.empty())
+		return false;
+
+	// One pass through visible rows replaces FindItem's full search for every
+	// linked source. Delete backwards so earlier indexes remain stable.
+	SetRedraw(false);
+	for (int i = GetItemCount(); --i >= 0;) {
+		const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(GetItemData(i));
+		if (item != NULL && removeItems.find(item) != removeItems.end())
+			DeleteItem(i);
+	}
+	SetRedraw(true);
+
+	for (std::unordered_set<const CtrlItem_Struct*>::const_iterator it = removeItems.begin();
+		it != removeItems.end(); ++it)
+		delete *it;
+
+	// Recompute the count here to preserve the original visibility semantics
+	// even if this file was absent from the selected category.
 	ShowFilesCount();
-	return bResult;
+	return true;
 }
 
 void CDownloadListCtrl::UpdateItem(void *toupdate)
