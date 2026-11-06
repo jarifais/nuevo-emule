@@ -100,7 +100,13 @@ public:
 	{
 		if (iItem < 0 || iItem >= GetItemCount())
 			return 0;
-		return CListCtrl::GetItemData(iItem);
+		const DWORD_PTR rowData = CListCtrl::GetItemData(iItem);
+#ifdef _DEBUG
+		// Validate the fast path against the original linked-list cache in
+		// Debug builds; Release avoids the linear comparison entirely.
+		ASSERT(rowData == CMuleListCtrl::GetItemData(iItem));
+#endif
+		return rowData;
 	}
 
 	UINT	m_curTab;
