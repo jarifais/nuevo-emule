@@ -373,6 +373,18 @@ void CDownloadListCtrl::UpdateItem(void *toupdate)
 	for (ListItems::const_iterator it = m_ListItems.lower_bound(toupdate); it != m_ListItems.end() && it->first == toupdate; ++it) {
 		CtrlItem_Struct *updateItem = it->second;
 
+		// Hidden source rows are by far the common case with large queues.
+		// They cannot need a list-view lookup, repaint or sort update.
+		// The source bitmap is invalidated when it is hidden by HideSources.
+		if (updateItem->type != FILE_TYPE) {
+			if (updateItem->owner == NULL || !updateItem->owner->srcarevisible)
+				continue;
+		} else {
+			const CPartFile *partfile = static_cast<CPartFile*>(updateItem->value);
+			if (partfile == NULL || !partfile->CheckShowItemInGivenCat(m_curTab))
+				continue;
+		}
+
 		// Find entry in CListCtrl and update object
 		LVFINDINFO find;
 		find.flags = LVFI_PARAM;
