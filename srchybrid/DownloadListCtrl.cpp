@@ -2197,7 +2197,8 @@ void CDownloadListCtrl::ChangeCategory(int newsel)
 	// Keep rows that remain visible and remove rows which no longer belong
 	// to the selected category in a single backwards pass. The old path
 	// called ShowFile/HideFile (which search all visible rows) for each
-	// download: category changes with 10,000 files were quadratic.
+	// download. Individual DeleteItem calls still cost time in the base
+	// control; do not claim the entire category switch is linear.
 	std::unordered_set<const CtrlItem_Struct*> visibleFiles;
 	for (int i = GetItemCount(); --i >= 0;) {
 		CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(GetItemData(i));
