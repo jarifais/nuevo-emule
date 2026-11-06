@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CPP = (ROOT / "srchybrid" / "DownloadListCtrl.cpp").read_text(encoding="utf-8-sig")
 HEADER = (ROOT / "srchybrid" / "DownloadListCtrl.h").read_text(encoding="utf-8-sig")
 PARTFILE = (ROOT / "srchybrid" / "PartFile.h").read_text(encoding="utf-8-sig")
+MULE = (ROOT / "srchybrid" / "MuleListCtrl.cpp").read_text(encoding="utf-8-sig")
 
 
 def body(start: str, end: str) -> str:
@@ -67,6 +68,15 @@ class DownloadListLayer1Contract(unittest.TestCase):
         self.assertIn("pNMListView->uChanged == LVIF_STATE", fn)
         self.assertLess(fn.index("return;"), fn.index("RedrawItems("))
         self.assertIn("if (item < 0 || item >= itemCount)", fn)
+
+    def test_scroll_end_releases_device_context_and_checks_empty_list(self):
+        first = MULE.index("void CMuleListCtrl::OnLvnEndScrollList(")
+        last = MULE.index("void CMuleListCtrl::InitItemMemDC(", first)
+        fn = MULE[first:last]
+        self.assertIn("iLast >= 0", fn)
+        self.assertIn("GetItemRect(iLast, &rcItem, LVIR_BOUNDS) &&", fn)
+        self.assertIn("CClientDC dc(this)", fn)
+        self.assertNotIn("GetDC()->", fn)
 
 
 if __name__ == "__main__":
