@@ -91,6 +91,18 @@ public:
 	CDownloadListCtrl(const CDownloadListCtrl&) = delete;
 	CDownloadListCtrl& operator=(const CDownloadListCtrl&) = delete;
 
+	// Read the row's lParam directly from the Windows list-view. The base
+	// CMuleListCtrl::GetItemData resolves the same value by FindIndex() in
+	// a linked list, which is linear in the row number. Drawing, keyboard
+	// selection and scanning many rows should not repeatedly do that work.
+	// Keep the base class's list and sort machinery unchanged.
+	DWORD_PTR GetItemData(int iItem)
+	{
+		if (iItem < 0 || iItem >= GetItemCount())
+			return 0;
+		return CListCtrl::GetItemData(iItem);
+	}
+
 	UINT	m_curTab;
 
 	void	UpdateItem(void *toupdate);
