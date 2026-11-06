@@ -18,12 +18,23 @@ on:
 permissions:
   contents: write
 
+# A newer commit supersedes older experimental builds for the same branch/PR.
+# Prevents concurrent releases built from obsolete source snapshots.
+concurrency:
+  group: nuevo-emule-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   import:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Contratos estáticos de la capa 1 (no sustituye pruebas en Windows)
+        if: github.ref != 'refs/heads/main'
+        shell: bash
+        run: python3 scripts/test_gui_layer1_contract.py
 
       - name: Descargar fuentes originales y verificar SHA256
         shell: bash
