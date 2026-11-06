@@ -264,7 +264,10 @@ static void CALLBACK myLogHandler(LPCSTR lpMsg)
 		theApp.QueueLogLine(false, _T("%hs"), lpMsg);
 }
 
-static const UINT UWM_ARE_YOU_EMULE = RegisterWindowMessage(EMULE_GUID);
+// Portable and installed eMule must not identify one another as their
+// own already running window. Each build uses a distinct registered message.
+static const UINT UWM_ARE_YOU_EMULE = RegisterWindowMessage(
+	CPreferences::IsPortableMode() ? _T("{eMule-nuevo-portable-instance-2026}") : EMULE_GUID);
 
 BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) noexcept;
 
