@@ -12,6 +12,7 @@ CPP = (ROOT / "srchybrid" / "DownloadListCtrl.cpp").read_text(encoding="utf-8-si
 HEADER = (ROOT / "srchybrid" / "DownloadListCtrl.h").read_text(encoding="utf-8-sig")
 PARTFILE = (ROOT / "srchybrid" / "PartFile.h").read_text(encoding="utf-8-sig")
 MULE = (ROOT / "srchybrid" / "MuleListCtrl.cpp").read_text(encoding="utf-8-sig")
+QUEUE = (ROOT / "srchybrid" / "DownloadQueue.cpp").read_text(encoding="utf-8-sig")
 
 
 def body(start: str, end: str) -> str:
@@ -79,7 +80,10 @@ class DownloadListLayer1Contract(unittest.TestCase):
         self.assertLess(fn.index("DeleteItem(i)"), fn.index("delete *it"))
         self.assertIn("SetRedraw(false);", fn)
         self.assertIn("SetRedraw(true);", fn)
-        self.assertIn("ShowFilesCount();", fn)
+        self.assertIn("ReportVisibleFileCount();", fn)
+        self.assertIn("if (DeleteItem(i) && isFile)", fn)
+        self.assertIn("m_nVisibleFileCount - removedVisibleFiles", fn)
+        self.assertNotIn("ShowFilesCount();", fn)
 
     def test_multiselect_state_does_not_redraw_neighbours(self):
         fn = body("void CDownloadListCtrl::OnListModified(", "int CDownloadListCtrl::Compare(")
@@ -87,6 +91,60 @@ class DownloadListLayer1Contract(unittest.TestCase):
         self.assertIn("pNMListView->uChanged == LVIF_STATE", fn)
         self.assertLess(fn.index("return;"), fn.index("RedrawItems("))
         self.assertIn("if (item < 0 || item >= itemCount)", fn)
+
+    def test_expansion_uses_owner_index_and_rolls_back_partial_insert(self):
+        self.assertIn("#include <unordered_map>", HEADER)
+        self.assertIn("std::unordered_multimap<CPartFile*, CtrlItem_Struct*>", HEADER)
+        fn = body("void CDownloadListCtrl::ExpandCollapseItem(", "void CDownloadListCtrl::OnLvnItemActivate(")
+        self.assertIn("m_SourcesByOwner.equal_range(partfile)", fn)
+        self.assertIn("if (insertionFailed && partfile->srcarevisible)", fn)
+        self.assertIn("HideSources(partfile);", fn)
+        self.assertNotIn("for (ListItems::const_iterator it = m_ListItems.begin()", fn)
+
+    def test_owner_index_tracks_creation_and_all_removal_paths(self):
+        add = body("void CDownloadListCtrl::AddSource(", "void CDownloadListCtrl::RemoveSource(")
+        self.assertIn("m_SourcesByOwner.emplace(owner, newitem);", add)
+        remove_source = body("void CDownloadListCtrl::RemoveSource(", "bool CDownloadListCtrl::RemoveFile(")
+        self.assertIn("m_SourcesByOwner.equal_range(item->owner)", remove_source)
+        self.assertLess(remove_source.index("m_SourcesByOwner.erase(ownerIt)"),
+                        remove_source.index("delete *it;"))
+        remove_file = body("bool CDownloadListCtrl::RemoveFile(", "void CDownloadListCtrl::UpdateItem(")
+        self.assertLess(remove_file.index("m_SourcesByOwner.erase("), remove_file.index("delete *it;"))
+        clear = body("void CDownloadListCtrl::ClearCompleted(int", "void CDownloadListCtrl::SetStyle(")
+        self.assertLess(clear.index("m_SourcesByOwner.erase("), clear.index("delete *it;"))
+        self.assertIn("m_SourcesByOwner.clear();", CPP)
+
+    def test_startup_batches_caption_updates_but_interactive_adds_notify(self):
+        add = body("void CDownloadListCtrl::AddFile(", "void CDownloadListCtrl::AddSource(")
+        self.assertIn("if (bNotifyCount)", add)
+        self.assertIn("ReportVisibleFileCount();", add)
+        self.assertIn("bNotifyCount = true", HEADER)
+        initialize = QUEUE.split("void CDownloadQueue::Init()", 1)[1].split(
+            "CDownloadQueue::~CDownloadQueue()", 1
+        )[0]
+        self.assertEqual(initialize.count("GetDownloadList().AddFile(toadd, false)"), 2)
+        self.assertEqual(initialize.count("GetDownloadList().ReportVisibleFileCount()"), 1)
+
+    def test_clear_completed_uses_one_batch_and_direct_lookup(self):
+        fn = body("void CDownloadListCtrl::ClearCompleted(int", "void CDownloadListCtrl::SetStyle(")
+        self.assertIn("std::unordered_set<const CPartFile*> completed;", fn)
+        self.assertIn("std::unordered_set<const CtrlItem_Struct*> removeItems;", fn)
+        self.assertIn("for (int i = GetItemCount(); --i >= 0;)", fn)
+        self.assertIn("m_SourcesByOwner.erase(", fn)
+        self.assertLess(fn.index("it = m_ListItems.erase(it)"), fn.index("DeleteItem(i)"))
+        self.assertLess(fn.index("DeleteItem(i)"), fn.index("delete *it"))
+        self.assertNotIn("it = m_ListItems.begin();", fn)
+        self.assertIn("m_ListItems.find(const_cast<CPartFile*>(pFile))", fn)
+
+    def test_selection_command_scans_are_coalesced(self):
+        fn = CPP.split("bool CDownloadListCtrl::ReportAvailableCommands(", 1)[1]
+        self.assertIn("const DWORD elapsed = curTick - m_dwLastAvailableCommandsCheck;", fn)
+        self.assertIn("m_availableCommandsDirty ? 200u : SEC2MS(3)", fn)
+
+    def test_source_tree_painting_checks_next_row_and_owner(self):
+        fn = body("void CDownloadListCtrl::DrawItem(", "void CDownloadListCtrl::HideSources(")
+        self.assertIn("nextItem != NULL", fn)
+        self.assertIn("nextItem->owner ==", fn)
 
     def test_scroll_end_releases_device_context_and_checks_empty_list(self):
         first = MULE.index("void CMuleListCtrl::OnLvnEndScrollList(")
