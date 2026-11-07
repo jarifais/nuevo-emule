@@ -29,6 +29,13 @@ class DownloadListLayer1Contract(unittest.TestCase):
         self.assertIn("ASSERT(rowData == CMuleListCtrl::GetItemData(iItem))", HEADER)
         self.assertIn("#ifdef _DEBUG", HEADER)
 
+    def test_add_file_does_not_count_failed_insertions(self):
+        fn = body("void CDownloadListCtrl::AddFile(", "void CDownloadListCtrl::AddSource(")
+        self.assertRegex(
+            fn,
+            r"if \(InsertItem\([^;]+\) >= 0\)\s*\+\+m_nVisibleFileCount;",
+        )
+
     def test_category_switch_does_not_find_every_file(self):
         fn = body("void CDownloadListCtrl::ChangeCategory(", "void CDownloadListCtrl::HideFile(")
         self.assertIn("std::unordered_set", fn)
