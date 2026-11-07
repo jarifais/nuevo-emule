@@ -16,6 +16,9 @@
 //Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "stdafx.h"
 #include <io.h>
+#include <algorithm>
+#include <map>
+#include <vector>
 #include "emule.h"
 #include "UpDownClient.h"
 #include "DownloadQueue.h"
@@ -108,7 +111,7 @@ void CDownloadQueue::Init()
 				filelist.AddTail(toadd); // to download queue
 				if (toadd->GetStatus(true) == PS_READY)
 					theApp.sharedfiles->SafeAddKFile(toadd); // part files are always shared files
-				theApp.emuledlg->transferwnd->GetDownloadList().AddFile(toadd); // show in download window
+				theApp.emuledlg->transferwnd->GetDownloadList().AddFile(toadd, false); // show in download window
 			} else
 				delete toadd;
 		}
@@ -138,7 +141,7 @@ void CDownloadQueue::Init()
 					filelist.AddTail(toadd);			// to download queue
 					if (toadd->GetStatus(true) == PS_READY)
 						theApp.sharedfiles->SafeAddKFile(toadd); // part files are always shared files
-					theApp.emuledlg->transferwnd->GetDownloadList().AddFile(toadd);// show in downloads window
+					theApp.emuledlg->transferwnd->GetDownloadList().AddFile(toadd, false);// show in downloads window
 
 					AddLogLine(false, GetResString(IDS_RECOVERED_PARTMET), (LPCTSTR)toadd->GetFileName());
 					toadd = NULL;
@@ -148,6 +151,9 @@ void CDownloadQueue::Init()
 		}
 		ff.Close();
 	}
+	// Report the final count only once after recovering potentially thousands
+	// of .part.met entries; this avoids repeated caption repaints at startup.
+	theApp.emuledlg->transferwnd->GetDownloadList().ReportVisibleFileCount();
 	if (count == 0)
 		AddLogLine(false, GetResString(IDS_NOPARTSFOUND));
 	else {
@@ -389,9 +395,17 @@ void CDownloadQueue::Process()
 	theStats.m_fGlobalDone = 0;
 	theStats.m_fGlobalSize = 0;
 	theStats.m_dwOverallStatus = 0;
-	//file list is already sorted by prio, therefore I removed all the extra loops.
+	// Active transfers retain their original 100-ms scheduling cadence.
+	// Paused/error/completed files only need periodic maintenance (hourly
+	// source purge and deferred deletion), not ten StopPausedFile calls/sec.
+	// Keep per-tick global statistics unchanged for existing GUI consumers.
+	const bool maintainInactiveFiles = m_udcounter >= 10;
+	// A single wall-clock sample is sufficient for all inactive files in this
+	// one-second maintenance pass; avoid thousands of time(NULL) calls.
+	const time_t inactiveMaintenanceTime = maintainInactiveFiles ? time(NULL) : 0;
 	for (POSITION pos = filelist.GetHeadPosition(); pos != NULL;) {
 		CPartFile *cur_file = filelist.GetNext(pos);
+		const EPartFileStatus fileStatus = cur_file->GetStatus();
 
 		// maintain global download stats
 		theStats.m_fGlobalDone += (float)cur_file->GetCompletedSize();
@@ -399,13 +413,13 @@ void CDownloadQueue::Process()
 
 		if (cur_file->GetTransferringSrcCount() > 0)
 			theStats.m_dwOverallStatus |= STATE_DOWNLOADING;
-		if (cur_file->GetStatus() == PS_ERROR)
+		if (fileStatus == PS_ERROR)
 			theStats.m_dwOverallStatus |= STATE_ERROROUS;
 
-		if (inSet(cur_file->GetStatus(), PS_READY, PS_EMPTY))
+		if (inSet(fileStatus, PS_READY, PS_EMPTY))
 			datarateX += cur_file->Process(factor, m_udcounter);
-		else
-			cur_file->StopPausedFile(); //also drop sources for paused and stopped files
+		else if (maintainInactiveFiles)
+			cur_file->StopPausedFile(inactiveMaintenanceTime);
 	}
 
 	average_dr_hist.AddTail(TransferredData{datarateX, curTick});
@@ -922,54 +936,50 @@ void CDownloadQueue::StopUDPRequests()
 	m_iSearchedServers = 0;
 }
 
-bool CDownloadQueue::CompareParts(POSITION pos1, POSITION pos2)
-{
-	CPartFile *file1 = filelist.GetAt(pos1);
-	CPartFile *file2 = filelist.GetAt(pos2);
-	return CPartFile::RightFileHasHigherPrio(file1, file2);
-}
-
-void CDownloadQueue::SwapParts(POSITION pos1, POSITION pos2)
-{
-	CPartFile *file1 = filelist.GetAt(pos1);
-	CPartFile *file2 = filelist.GetAt(pos2);
-	filelist.SetAt(pos1, file2);
-	filelist.SetAt(pos2, file1);
-}
-
-void CDownloadQueue::HeapSort(UINT first, UINT last)
-{
-	UINT r;
-	POSITION pos1 = filelist.FindIndex(first);
-	for (r = first; !(r & (UINT)INT_MIN) && (r << 1) < last;) {
-		UINT r2 = (r << 1) + 1;
-		POSITION pos2 = filelist.FindIndex(r2);
-		if (r2 != last) {
-			POSITION pos3 = pos2;
-			filelist.GetNext(pos3);
-			if (!CompareParts(pos2, pos3)) {
-				pos2 = pos3;
-				++r2;
-			}
-		}
-		if (CompareParts(pos1, pos2))
-			break;
-		SwapParts(pos1, pos2);
-		r = r2;
-		pos1 = pos2;
-	}
-}
-
 void CDownloadQueue::SortByPriority()
 {
-	UINT n = (UINT)filelist.GetCount();
-	if (!n)
-		return;
-	for (UINT i = n / 2; i--;)
-		HeapSort(i, n - 1);
-	for (UINT i = n; --i;) {
-		SwapParts(filelist.FindIndex(0), filelist.FindIndex(i));
-		HeapSort(0, i - 1);
+	// The queue is a linked list. FindIndex() walks it from the beginning,
+	// so using it throughout heap sort makes large queues unnecessarily slow.
+	// Sort pointers in an indexed buffer, then write them back to the
+	// existing list without replacing it or changing its external semantics.
+	std::vector<CPartFile*> ordered;
+	ordered.reserve(static_cast<size_t>(filelist.GetCount()));
+	for (POSITION pos = filelist.GetHeadPosition(); pos != NULL;)
+		ordered.push_back(filelist.GetNext(pos));
+
+	std::stable_sort(ordered.begin(), ordered.end(), [](CPartFile *left, CPartFile *right) {
+		const UINT leftCat = left->GetCategory();
+		const UINT rightCat = right->GetCategory();
+		const Category_Struct *leftCategory = thePrefs.GetCategory(leftCat);
+		const Category_Struct *rightCategory = thePrefs.GetCategory(rightCat);
+		if (leftCategory->prio != rightCategory->prio)
+			return leftCategory->prio > rightCategory->prio;
+		if (left->GetDownPriority() != right->GetDownPriority())
+			return left->GetDownPriority() > right->GetDownPriority();
+		// The original alphabetical tie-break only applies within a category.
+		// Different categories with equal priorities were incomparable, which
+		// violates std::stable_sort's strict-weak-order requirement. Order such
+		// ties consistently by category index; keep equal items stable.
+		if (leftCat != rightCat)
+			return leftCat < rightCat;
+		if (leftCat != 0 && leftCategory->downloadInAlphabeticalOrder
+			&& thePrefs.IsExtControlsEnabled()) {
+			const CString &leftName(left->GetFileName());
+			const CString &rightName(right->GetFileName());
+			// An empty name must also have a deterministic position:
+			// treating it as equivalent to every non-empty name is not transitive.
+			if (leftName.IsEmpty() != rightName.IsEmpty())
+				return !leftName.IsEmpty();
+			return leftName.CompareNoCase(rightName) < 0;
+		}
+		return false;
+	});
+
+	POSITION pos = filelist.GetHeadPosition();
+	for (size_t i = 0; i < ordered.size(); ++i) {
+		POSITION current = pos;
+		filelist.GetNext(pos);
+		filelist.SetAt(current, ordered[i]);
 	}
 }
 
@@ -1004,8 +1014,23 @@ void CDownloadQueue::CheckDiskspace(bool bNotEnoughSpaceLeft)
 		return;
 	}
 
-	// 'bNotEnoughSpaceLeft' - avoid worse case of having already 'disk full'
-	uint64 nTotalAvailableSpaceMain = bNotEnoughSpaceLeft ? 0 : GetFreeDiskSpaceX(thePrefs.GetTempDir());
+	// 'bNotEnoughSpaceLeft' must remain a hard zero-space signal: never
+	// reuse a prior disk-space sample after the write path reports full.
+	const bool singleTempDir = thePrefs.GetTempDirCount() == 1;
+	const uint64 nTotalAvailableSpaceMain = (bNotEnoughSpaceLeft || !singleTempDir)
+		? 0 : GetFreeDiskSpaceX(thePrefs.GetTempDir());
+
+	// With multiple Temp folders, querying free space once *per file* causes
+	// thousands of filesystem calls on a large queue (especially USB SSDs).
+	// Cache by the actual directory of each .part, not just by drive letter:
+	// junctions, UNC shares and volume mount points may differ on one drive.
+	// The cache is scoped to this check only; periodic checks requery the disk.
+	struct TempPathLess {
+		bool operator()(const CString &left, const CString &right) const {
+			return left.Compare(right) < 0;
+		}
+	};
+	std::map<CString, uint64, TempPathLess> freeSpaceByTempDir;
 
 	for (POSITION pos = filelist.GetHeadPosition(); pos != NULL;) {
 		CPartFile *cur_file = filelist.GetNext(pos);
@@ -1017,8 +1042,21 @@ void CDownloadQueue::CheckDiskspace(bool bNotEnoughSpaceLeft)
 		case PS_COMPLETE:
 			break;
 		default:
-			uint64 nTotalAvailableSpace = bNotEnoughSpaceLeft ? 0 :
-				((thePrefs.GetTempDirCount() == 1) ? nTotalAvailableSpaceMain : GetFreeDiskSpaceX(cur_file->GetTmpPath()));
+			uint64 nTotalAvailableSpace = 0;
+			if (!bNotEnoughSpaceLeft) {
+				if (singleTempDir)
+					nTotalAvailableSpace = nTotalAvailableSpaceMain;
+				else {
+					const CString tempPath(cur_file->GetTmpPath());
+					std::map<CString, uint64, TempPathLess>::const_iterator cached = freeSpaceByTempDir.find(tempPath);
+					if (cached == freeSpaceByTempDir.end()) {
+						const uint64 freeSpace = GetFreeDiskSpaceX(tempPath);
+						freeSpaceByTempDir.insert(std::make_pair(tempPath, freeSpace));
+						nTotalAvailableSpace = freeSpace;
+					} else
+						nTotalAvailableSpace = cached->second;
+				}
+			}
 			if (thePrefs.GetMinFreeDiskSpace() == 0) {
 				// Pause the file only if it would grow in size and would exceed the currently available free space
 				if (cur_file->GetNeededSpace() <= nTotalAvailableSpace)
@@ -1322,67 +1360,88 @@ void CDownloadQueue::ProcessLocalRequests()
 		return;
 	CSafeMemFile dataTcpFrame(22);
 	static const int iMaxFilesPerTcpFrame = 15;
-	int iFiles = 0;
-	while (!m_localServerReqQueue.IsEmpty() && iFiles < iMaxFilesPerTcpFrame) {
-		// find the file with the longest waiting time
-		DWORD dwBestWaitTime = _UI32_MAX;
-		POSITION posNextRequest = NULL;
-		for (POSITION pos = m_localServerReqQueue.GetHeadPosition(); pos != NULL;) {
-			POSITION pos2 = pos;
-			CPartFile *cur_file = m_localServerReqQueue.GetNext(pos);
-			if (cur_file->GetStatus() == PS_READY || cur_file->GetStatus() == PS_EMPTY) {
-				uint8 nPriority = cur_file->GetDownPriority();
-				ASSERT(nPriority <= PR_HIGH);
-				nPriority = (nPriority >= PR_HIGH) ? 0 : PR_HIGH - nPriority;
-				if (cur_file->m_LastSearchTime + nPriority < dwBestWaitTime) {
-					dwBestWaitTime = cur_file->m_LastSearchTime + nPriority;
-					posNextRequest = pos2;
-				}
-			} else {
-				m_localServerReqQueue.RemoveAt(pos2);
-				cur_file->m_bLocalSrcReqQueued = false;
-				if (thePrefs.GetDebugSourceExchange())
-					AddDebugLogLine(false, _T("SXSend: Local server source request for file \"%s\" not sent because of status '%s'"), (LPCTSTR)cur_file->GetFileName(), (LPCTSTR)cur_file->getPartfileStatus());
-			}
-		}
 
-		if (posNextRequest != NULL) {
-			CPartFile *cur_file = m_localServerReqQueue.GetAt(posNextRequest);
+	// Select the next TCP frame from a single snapshot of pending requests.
+	// Previously the entire queue was rescanned up to 15 times per frame.
+	// List positions stay valid while other nodes are removed.
+	struct RequestCandidate {
+		POSITION position;
+		DWORD score;
+	};
+	std::vector<RequestCandidate> candidates;
+	candidates.reserve(static_cast<size_t>(m_localServerReqQueue.GetCount()));
+	for (POSITION pos = m_localServerReqQueue.GetHeadPosition(); pos != NULL;) {
+		POSITION requestPos = pos;
+		CPartFile *cur_file = m_localServerReqQueue.GetNext(pos);
+		const EPartFileStatus status = cur_file->GetStatus();
+		if (status == PS_READY || status == PS_EMPTY) {
+			uint8 priority = cur_file->GetDownPriority();
+			ASSERT(priority <= PR_HIGH);
+			priority = (priority >= PR_HIGH) ? 0 : PR_HIGH - priority;
+			const DWORD score = cur_file->m_LastSearchTime + priority;
+			// The original exclusive sentinel must remain ineligible.
+			if (score != _UI32_MAX)
+				candidates.push_back(RequestCandidate{requestPos, score});
+		} else {
+			m_localServerReqQueue.RemoveAt(requestPos);
 			cur_file->m_bLocalSrcReqQueued = false;
-			cur_file->m_LastSearchTime = curTick;
-			m_localServerReqQueue.RemoveAt(posNextRequest);
-
-			if (cur_file->IsLargeFile() && (theApp.serverconnect->GetCurrentServer() == NULL || !theApp.serverconnect->GetCurrentServer()->SupportsLargeFilesTCP())) {
-				ASSERT(0);
-				DebugLogError(_T("Large file (%s) requested from local server without support for large files"), (LPCTSTR)cur_file->GetFileName());
-				continue;
-			}
-
-			++iFiles;
-
-			// create request packet
-			CSafeMemFile smPacket;
-			smPacket.WriteHash16(cur_file->GetFileHash());
-			if (cur_file->IsLargeFile()) {
-				smPacket.WriteUInt32(0); // indicates that this is a large file and a uint64 follows
-				smPacket.WriteUInt64(cur_file->GetFileSize());
-			} else
-				smPacket.WriteUInt32((uint32)(uint64)cur_file->GetFileSize());
-
-			uint8 byOpcode;
-			if (thePrefs.IsCryptLayerEnabled() && theApp.serverconnect->GetCurrentServer() != NULL && theApp.serverconnect->GetCurrentServer()->SupportsGetSourcesObfuscation())
-				byOpcode = OP_GETSOURCES_OBFU;
-			else
-				byOpcode = OP_GETSOURCES;
-
-			Packet packet(smPacket, OP_EDONKEYPROT, byOpcode);
-			if (thePrefs.GetDebugServerTCPLevel() > 0)
-				Debug(_T(">>> Sending OP_GetSources%s(%2u/%2u); %s\n"), (byOpcode == OP_GETSOURCES) ? _T("") : _T("_OBFU"), iFiles, iMaxFilesPerTcpFrame, (LPCTSTR)DbgGetFileInfo(cur_file->GetFileHash()));
-			dataTcpFrame.Write(packet.GetPacket(), packet.GetRealPacketSize());
-
 			if (thePrefs.GetDebugSourceExchange())
-				AddDebugLogLine(false, _T("SXSend: Local server source request; File=\"%s\""), (LPCTSTR)cur_file->GetFileName());
+				AddDebugLogLine(false, _T("SXSend: Local server source request for file \"%s\" not sent because of status '%s'"), (LPCTSTR)cur_file->GetFileName(), (LPCTSTR)cur_file->getPartfileStatus());
 		}
+	}
+
+	// Stable ordering preserves the old first-in-queue tie-break.
+	std::stable_sort(candidates.begin(), candidates.end(),
+		[](const RequestCandidate &left, const RequestCandidate &right) {
+			return left.score < right.score;
+		});
+
+	int iFiles = 0;
+	for (size_t i = 0; i < candidates.size() && iFiles < iMaxFilesPerTcpFrame; ++i) {
+		CPartFile *cur_file = m_localServerReqQueue.GetAt(candidates[i].position);
+		const EPartFileStatus status = cur_file->GetStatus();
+		if (status != PS_READY && status != PS_EMPTY) {
+			// Retain the legacy status check before sending.
+			m_localServerReqQueue.RemoveAt(candidates[i].position);
+			cur_file->m_bLocalSrcReqQueued = false;
+			if (thePrefs.GetDebugSourceExchange())
+				AddDebugLogLine(false, _T("SXSend: Local server source request for file \"%s\" not sent because of status '%s'"), (LPCTSTR)cur_file->GetFileName(), (LPCTSTR)cur_file->getPartfileStatus());
+			continue;
+		}
+		cur_file->m_bLocalSrcReqQueued = false;
+		cur_file->m_LastSearchTime = curTick;
+		m_localServerReqQueue.RemoveAt(candidates[i].position);
+
+		if (cur_file->IsLargeFile() && (theApp.serverconnect->GetCurrentServer() == NULL || !theApp.serverconnect->GetCurrentServer()->SupportsLargeFilesTCP())) {
+			ASSERT(0);
+			DebugLogError(_T("Large file (%s) requested from local server without support for large files"), (LPCTSTR)cur_file->GetFileName());
+			continue;
+		}
+
+		++iFiles;
+
+		// create request packet
+		CSafeMemFile smPacket;
+		smPacket.WriteHash16(cur_file->GetFileHash());
+		if (cur_file->IsLargeFile()) {
+			smPacket.WriteUInt32(0); // indicates that this is a large file and a uint64 follows
+			smPacket.WriteUInt64(cur_file->GetFileSize());
+		} else
+			smPacket.WriteUInt32((uint32)(uint64)cur_file->GetFileSize());
+
+		uint8 byOpcode;
+		if (thePrefs.IsCryptLayerEnabled() && theApp.serverconnect->GetCurrentServer() != NULL && theApp.serverconnect->GetCurrentServer()->SupportsGetSourcesObfuscation())
+			byOpcode = OP_GETSOURCES_OBFU;
+		else
+			byOpcode = OP_GETSOURCES;
+
+		Packet packet(smPacket, OP_EDONKEYPROT, byOpcode);
+		if (thePrefs.GetDebugServerTCPLevel() > 0)
+			Debug(_T(">>> Sending OP_GetSources%s(%2u/%2u); %s\n"), (byOpcode == OP_GETSOURCES) ? _T("") : _T("_OBFU"), iFiles, iMaxFilesPerTcpFrame, (LPCTSTR)DbgGetFileInfo(cur_file->GetFileHash()));
+		dataTcpFrame.Write(packet.GetPacket(), packet.GetRealPacketSize());
+
+		if (thePrefs.GetDebugSourceExchange())
+			AddDebugLogLine(false, _T("SXSend: Local server source request; File=\"%s\""), (LPCTSTR)cur_file->GetFileName());
 	}
 
 	int iSize = (int)dataTcpFrame.GetLength();

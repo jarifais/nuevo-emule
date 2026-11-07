@@ -2,6 +2,12 @@ name: Importar eMule Community 0.72a y validar mejora
 
 on:
   push:
+    branches: [main, fix/partfile-safety-2026-11-04]
+    paths:
+      - '.github/workflows/bootstrap-emule.yml'
+      - 'srchybrid/**'
+      - 'scripts/**'
+  pull_request:
     branches: [main]
     paths:
       - '.github/workflows/bootstrap-emule.yml'
@@ -12,12 +18,27 @@ on:
 permissions:
   contents: write
 
+# A newer commit supersedes older experimental builds for the same branch/PR.
+# Prevents concurrent releases built from obsolete source snapshots.
+concurrency:
+  group: nuevo-emule-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   import:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Contratos estáticos de la capa 1 (no sustituye pruebas en Windows)
+        if: github.ref != 'refs/heads/main'
+        shell: bash
+        run: |
+          python3 scripts/test_gui_layer1_contract.py
+          python3 scripts/test_portable_shared_paths_contract.py
+          python3 scripts/test_scheduler_layer2_contract.py
+          python3 scripts/test_io_layer3_contract.py
 
       - name: Descargar fuentes originales y verificar SHA256
         shell: bash
@@ -68,11 +89,9 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
       - name: Obtener dependencias C++ con commits fijados
         shell: pwsh
         run: |
@@ -133,19 +152,99 @@ jobs:
           if (-not (Test-Path "srchybrid/emule.sln")) { throw "No se importaron las fuentes" }
           msbuild "srchybrid/emule.sln" /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /v:minimal /bl:compilacion.binlog
           if ($LASTEXITCODE -ne 0) { throw "MSBuild error $LASTEXITCODE" }
-      - name: Subir ejecutable para pruebas
-        if: success()
+      - name: Preparar ZIP portable Windows x64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'srchybrid/x64/Release/emule.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "No se generó emule.exe en $exe" }
+          $dir = Join-Path $env:RUNNER_TEMP 'nuevo-emule-portable'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $dir 'nuevo-emule.exe')
+          # Include an isolated, initially empty profile. Do not ship any
+          # installed user's settings, part files or credentials.
+          foreach ($sub in @('data', 'data/config', 'data/Temp', 'data/Incoming')) {
+            New-Item -ItemType Directory -Path (Join-Path $dir $sub) -Force | Out-Null
+          }
+          @'
+          NUEVO EMULE PORTABLE - WINDOWS x64 (PRUEBA EXPERIMENTAL)
+
+          MODO AISLADO (PREDETERMINADO)
+          1. Extrae el ZIP en una carpeta distinta, con permiso de escritura.
+          2. Ejecuta nuevo-emule.exe. Sus rutas por defecto estan en:
+               data\config\
+               data\Temp\
+               data\Incoming\
+          3. El portable utiliza su propia configuracion y no modifica las
+             asociaciones ED2K ni el inicio automatico del eMule instalado.
+
+          REUTILIZAR TU COLA Y RUTAS SIN DUPLICAR Temp:
+          1. CIERRA COMPLETAMENTE el eMule instalado, incluido su proceso.
+          2. Copia SOLO preferences.ini y Category.ini desde la carpeta config
+             de tu eMule instalado hasta data\config\ de este portable.
+             NO copies la carpeta Temp ni Incoming. Tampoco muevas .part.
+          3. Conecta la unidad USB donde estan las carpetas originales.
+          4. Ejecuta SOLO nuevo-emule.exe. Comprueba en Opciones > Carpetas
+             que Temp e Incoming siguen apuntando a las rutas originales.
+          5. Al cerrar normalmente, las preferencias se guardan en
+             data\config\preferences.ini. El progreso de descarga se
+             guarda en los archivos .part y .part.met ORIGINALES.
+          6. Cierra el portable ANTES de volver a abrir el eMule instalado.
+
+          ADVERTENCIA: nunca ejecutes ambos programas a la vez apuntando
+          a las mismas carpetas Temp. El portable intenta impedirlo, pero
+          los parametros para ignorar instancias pueden saltarse la proteccion.
+          Para la primera prueba con 10.000+ descargas, deja la red
+          desconectada y evalua la interfaz; respalda si es posible los
+          .part.met y .part.met.bak antes de descargar con la version nueva.
+          Esta compilacion es experimental y no ha sido validada con la
+          cola real del usuario.
+          '@ | Set-Content -LiteralPath (Join-Path $dir 'LEEME.txt') -Encoding utf8
+          'Modo aislado por defecto. Para reutilizar rutas instaladas, consultar LEEME.txt; nunca compartir Temp simultaneamente.' |
+            Set-Content -LiteralPath (Join-Path $dir 'data/LEEME-DATOS.txt') -Encoding utf8
+          if (-not (Test-Path (Join-Path $dir 'nuevo-emule.exe'))) { throw 'Falta el ejecutable portable' }
+          if (-not (Test-Path (Join-Path $dir 'data/Temp'))) { throw 'Falta carpeta Temp aislada' }
+          $zip = Join-Path $env:GITHUB_WORKSPACE 'nuevo-emule-portable-windows-x64.zip'
+          Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zip -Force
+          Add-Type -AssemblyName System.IO.Compression
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\\','/') })
+            if ($entries -notcontains 'nuevo-emule.exe' -or
+                $entries -notcontains 'LEEME.txt' -or
+                $entries -notcontains 'data/LEEME-DATOS.txt') {
+              throw "ZIP portable incompleto: $($entries -join ', ')"
+            }
+          } finally {
+            $archive.Dispose()
+          }
+          Get-FileHash -Algorithm SHA256 $zip | Format-List
+          if (-not (Test-Path -LiteralPath $zip)) { throw "ZIP no generado" }
+      - name: Publicar ZIP como prerelease de pruebas sin usar almacenamiento de Actions
+        id: publicar_portable
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $short = $env:GITHUB_SHA.Substring(0,12)
+          $tag = "portable-test-$short"
+          $zip = Join-Path $env:GITHUB_WORKSPACE 'nuevo-emule-portable-windows-x64.zip'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $tag $zip --title "Prueba portable x64 $short" --notes "Versión experimental. Compilada, sin validación funcional con descargas reales. Hacer copia de seguridad de .part, .part.met y config antes de usar." --prerelease --target $env:GITHUB_SHA --repo $env:GITHUB_REPOSITORY
+          }
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo publicar el ZIP portable" }
+
+      - name: Respaldo ZIP portable como artefacto si Releases rechaza permisos
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.publicar_portable.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: nuevo-emule-0.72a-windows-x64
-          path: |
-            **/emule.exe
-            **/eMule.exe
+          name: nuevo-emule-portable-windows-x64-${{ github.sha }}
+          path: nuevo-emule-portable-windows-x64.zip
           if-no-files-found: error
-      - name: Guardar diagnostico MSBuild
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: diagnostico-compilacion
-          path: compilacion.binlog
-          if-no-files-found: ignore
+          retention-days: 7

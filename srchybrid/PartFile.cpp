@@ -18,6 +18,7 @@
 #include <io.h>
 #include <sys/stat.h>
 #include <winioctl.h>
+#include <shlobj.h> // SHCreateDirectoryEx: create missing destination trees
 #ifdef _DEBUG
 #include "DebugHelpers.h"
 #endif
@@ -2794,12 +2795,24 @@ BOOL CPartFile::PerformFileComplete()
 	const CString &strPartfilename(RemoveFileExtension(m_fullname));
 	_tcscpy(newfilename, (LPCTSTR)StripInvalidFilenameChars(newfilename));
 
+	// Recreate a deleted destination only for categories created by
+	// the new "Descargar en..." feature. All other categories keep
+	// their original eMule destination/fallback behaviour.
+	const Category_Struct *category = thePrefs.GetCategory(GetCategory());
+	if (GetCategory() > 0 && category->strTitle.Left(9) == _T("Destino: ")
+		&& !::PathIsDirectory(category->strIncomingPath)) {
+		CString createPath(category->strIncomingPath);
+		if (!::PathIsRoot(createPath))
+			createPath.TrimRight(_T("\\"));
+		::SHCreateDirectoryEx(NULL, createPath, NULL);
+	}
 	CString indir;
-	if (::PathFileExists(thePrefs.GetCategory(GetCategory())->strIncomingPath))
-		indir = thePrefs.GetCategory(GetCategory())->strIncomingPath;
+	if (::PathFileExists(category->strIncomingPath))
+		indir = category->strIncomingPath;
 	else
 		indir = thePrefs.GetMuleDirectory(EMULE_INCOMINGDIR);
 	ASSERT(indir.Right(1) == _T("\\"));
+
 	// close permanent handle
 	try {
 		if ((HANDLE)m_hpartfile != INVALID_HANDLE_VALUE)
@@ -2826,7 +2839,8 @@ BOOL CPartFile::PerformFileComplete()
 
 		int namecount = 0;
 		//search for matching ()s and check if it contains a number
-		if ((ext != newfilename) && (_tcsrchr(newfilename, _T(')')) + 1 == last)) {
+		TCHAR *closingParen = _tcsrchr(newfilename, _T(')'));
+		if ((ext != newfilename) && closingParen != NULL && closingParen + 1 == last) {
 			TCHAR *first = _tcsrchr(newfilename, _T('('));
 			if (first != NULL) {
 				++first;
@@ -2966,7 +2980,7 @@ void CPartFile::PerformFileCompleteEnd(DWORD dwResult)
 		thePrefs.Add2DownSessionCompletedFiles();
 		thePrefs.SaveCompletedDownloadsStat();
 
-		// 05-Jän-2004 [bc]: ed2k and Kad are already full of totally wrong and/or not properly
+		// 05-JÃ¤n-2004 [bc]: ed2k and Kad are already full of totally wrong and/or not properly
 		// attached meta data. Take the chance to clean any available meta data tags and provide
 		// only tags which were determined by us.
 		UpdateMetaDataTags();
@@ -3254,10 +3268,14 @@ void CPartFile::StopFile(bool bCancel, bool resort)
 	UpdateDisplayedInfo(true);
 }
 
-void CPartFile::StopPausedFile()
+void CPartFile::StopPausedFile(time_t currentTime)
 {
-	//Once an hour, remove any sources for files which are no longer active downloads
-	if (inSet(GetStatus(), PS_PAUSED, PS_INSUFFICIENT, PS_ERROR) && !m_stopped && time(NULL) >= m_iLastPausePurge + HR2S(1))
+	// Once an hour, remove sources for files which are no longer active.
+	// The queue supplies one timestamp per sweep; callers outside the queue
+	// can still omit it and use the local clock, retaining the old behavior.
+	if (currentTime == 0)
+		currentTime = time(NULL);
+	if (inSet(GetStatus(), PS_PAUSED, PS_INSUFFICIENT, PS_ERROR) && !m_stopped && currentTime >= m_iLastPausePurge + HR2S(1))
 		StopFile();
 	else if (m_bDelayDelete)
 		DeletePartFile();
@@ -4569,7 +4587,7 @@ bool CPartFile::GetNextRequestedBlock(CUpDownClient *sender, Requested_Block_Str
 	//      completed before starting to download an other one.
 	//
 	// The frequency criterion defines 4 grades of availability: very rare, rare, almost rare,
-	// and common. Inside each grade, the criteria have a specific ‘weight’, used
+	// and common. Inside each grade, the criteria have a specific Â‘weightÂ’, used
 	// to calculate the priority of chunks. The chunk(s) with the highest
 	// priority (highest=0, lowest=0xffff) is/are selected first.
 	//

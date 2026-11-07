@@ -151,6 +151,15 @@ class CPreferences
 	static LPCWSTR	m_pszBindAddrW;
 	static void		MovePreferences(EDefaultDirectory eSrc, LPCTSTR const sFile, const CString &dst);
 public:
+	// Windows x64 Release of this fork is an isolated portable application.
+	static bool IsPortableMode()
+	{
+#ifdef NEW_EMULE_PORTABLE_BUILD
+		return true;
+#else
+		return false;
+#endif
+	}
 	static CString	strNick;
 	// ZZ:UploadSpeedSense -->
 	static uint32	m_minupload;
@@ -369,14 +378,14 @@ public:
 
 	static UINT		m_uTransferWnd1;
 	static UINT		m_uTransferWnd2;
-	//MORPH START - Added by SiRoB, Splitting Bar [O²]
+	//MORPH START - Added by SiRoB, Splitting Bar [OÂ²]
 	static UINT		splitterbarPositionStat;
 	static UINT		splitterbarPositionStat_HL;
 	static UINT		splitterbarPositionStat_HR;
 	static UINT		splitterbarPositionFriend;
 	static UINT		splitterbarPositionIRC;
 	static UINT		splitterbarPositionShared;
-	//MORPH END - Added by SiRoB, Splitting Bar [O²]
+	//MORPH END - Added by SiRoB, Splitting Bar [OÂ²]
 	static UINT		m_uDeadServerRetries;
 	static DWORD	m_dwServerKeepAliveTimeout;
 	// -khaos--+++> Changed data type to avoid overflows
@@ -677,6 +686,10 @@ public:
 	static LPCTSTR	GetConfigFile();
 	static const CString& GetFileCommentsFilePath()		{ return m_strFileCommentsFilePath; }
 	static CString	GetMuleDirectory(EDefaultDirectory eDirectory, bool bCreate = true);
+	// Query the isolated portable default without mutating the saved paths.
+	// GetDefaultDirectory is protected; startup exclusion checks use this wrapper.
+	static CString	GetPortableDefaultDirectory(EDefaultDirectory eDirectory)
+		{ ASSERT(IsPortableMode()); return GetDefaultDirectory(eDirectory, false); }
 	static void		SetMuleDirectory(EDefaultDirectory eDirectory, const CString &strNewDir);
 	static void		ChangeUserDirMode(int nNewMode);
 
@@ -993,7 +1006,7 @@ public:
 	static void		SetTransferWnd1(UINT uWnd1)			{ m_uTransferWnd1 = uWnd1; }
 	static UINT		GetTransferWnd2()					{ return m_uTransferWnd2; }
 	static void		SetTransferWnd2(UINT uWnd2)			{ m_uTransferWnd2 = uWnd2; }
-	//MORPH START - Added by SiRoB, Splitting Bar [O²]
+	//MORPH START - Added by SiRoB, Splitting Bar [OÂ²]
 	static UINT		GetSplitterbarPositionStat()		{ return splitterbarPositionStat; }
 	static void		SetSplitterbarPositionStat(UINT pos) { splitterbarPositionStat = pos; }
 	static UINT		GetSplitterbarPositionStat_HL()		{ return splitterbarPositionStat_HL; }
@@ -1006,7 +1019,7 @@ public:
 	static void		SetSplitterbarPositionIRC(UINT pos)	{ splitterbarPositionIRC = pos; }
 	static UINT		GetSplitterbarPositionShared()		{ return splitterbarPositionShared; }
 	static void		SetSplitterbarPositionShared(UINT pos)	{ splitterbarPositionShared = pos; }
-	//MORPH END   - Added by SiRoB, Splitting Bar [O²]
+	//MORPH END   - Added by SiRoB, Splitting Bar [OÂ²]
 	// -khaos--+++> Changed datatype to avoid overflows
 	static UINT		GetStatsMax()						{ return statsMax; }
 	// <-----khaos-
@@ -1111,7 +1124,7 @@ public:
 
 	// Barry
 	static UINT		Get3DDepth()						{ return depth3D; }
-	static bool		AutoTakeED2KLinks()					{ return autotakeed2klinks; }
+	static bool		AutoTakeED2KLinks()					{ return !IsPortableMode() && autotakeed2klinks; }
 	static bool		AddNewFilesPaused()					{ return addnewfilespaused; }
 
 	static bool		TransferlistRemainSortStyle()		{ return m_bTransflstRemain; }

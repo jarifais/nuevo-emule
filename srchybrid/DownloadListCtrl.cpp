@@ -15,6 +15,7 @@
 //along with this program; if not, write to the Free Software
 //Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "stdafx.h"
+#include <unordered_set>
 #include "emule.h"
 #include "DownloadListCtrl.h"
 #include "updownclient.h"
@@ -77,6 +78,7 @@ CDownloadListCtrl::CDownloadListCtrl()
 	, m_dwLastAvailableCommandsCheck()
 	, m_bRemainSort()
 	, m_availableCommandsDirty(true)
+	, m_nVisibleFileCount(0)
 {
 	SetGeneralPurposeFind(true);
 	SetSkinKey(_T("DownloadsLv"));
@@ -93,6 +95,7 @@ CDownloadListCtrl::~CDownloadListCtrl()
 	if (m_FileMenu)
 		VERIFY(m_FileMenu.DestroyMenu());
 
+	m_SourcesByOwner.clear(); // non-owning index: release references first
 	while (!m_ListItems.empty()) {
 		delete m_ListItems.begin()->second; // second = CtrlItem_Struct*
 		m_ListItems.erase(m_ListItems.begin());
@@ -229,7 +232,7 @@ void CDownloadListCtrl::Localize()
 	ShowFilesCount();
 }
 
-void CDownloadListCtrl::AddFile(CPartFile *toadd)
+void CDownloadListCtrl::AddFile(CPartFile *toadd, bool bNotifyCount)
 {
 	// Create new Item
 	CtrlItem_Struct *newitem = new CtrlItem_Struct;
@@ -243,10 +246,22 @@ void CDownloadListCtrl::AddFile(CPartFile *toadd)
 	ASSERT(m_ListItems.find(toadd) == m_ListItems.end());
 	m_ListItems.emplace(toadd, newitem);
 
-	if (toadd->CheckShowItemInGivenCat(m_curTab))
-		InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)newitem);
+	if (toadd->CheckShowItemInGivenCat(m_curTab)) {
+		// Failed insertions (e.g. exhausted list-view resources) must not
+		// inflate the visible count used by the Transfers tab.
+		if (InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)newitem) >= 0)
+			++m_nVisibleFileCount;
+	}
+	// During startup the queue loads thousands of files. Defer the window
+	// caption update until the recovered batch has been inserted; interactive
+	// AddFile calls still update the count immediately.
+	if (bNotifyCount)
+		ReportVisibleFileCount();
+}
 
-	ShowFilesCount();
+void CDownloadListCtrl::ReportVisibleFileCount()
+{
+	theApp.emuledlg->transferwnd->UpdateFilesCount(m_nVisibleFileCount);
 }
 
 void CDownloadListCtrl::AddSource(CPartFile *owner, CUpDownClient *source, bool notavailable)
@@ -288,6 +303,7 @@ void CDownloadListCtrl::AddSource(CPartFile *owner, CUpDownClient *source, bool 
 	newitem->type = itemtype;
 
 	m_ListItems.emplace(source, newitem);
+	m_SourcesByOwner.emplace(owner, newitem);
 
 	if (owner->srcarevisible) {
 		// find parent from the CListCtrl to add source
@@ -305,58 +321,100 @@ void CDownloadListCtrl::RemoveSource(CUpDownClient *source, CPartFile *owner)
 	if (theApp.IsClosing())
 		return;
 
-	// Retrieve all entries matching the source
-	for (ListItems::const_iterator it = m_ListItems.lower_bound(source); it != m_ListItems.end() && it->first == source;) {
-		const CtrlItem_Struct *delItem = it->second;
-		if (owner == NULL || owner == delItem->owner) {
-			// Remove it from the m_ListItems
+	// A client may be listed under multiple files (A4AF). Collect every
+	// matching entry before touching the list-view: repeated FindItem scans
+	// become expensive with large queues, and rows must not retain pointers
+	// to freed CtrlItem_Struct objects.
+	std::unordered_set<const CtrlItem_Struct*> removeItems;
+	for (ListItems::const_iterator it = m_ListItems.lower_bound(source);
+		it != m_ListItems.end() && it->first == source;) {
+		const CtrlItem_Struct *item = it->second;
+		if (owner == NULL || owner == item->owner) {
+			// Unlink the second index before the item can be destroyed.
+			std::pair<SourcesByOwner::iterator, SourcesByOwner::iterator> sources = m_SourcesByOwner.equal_range(item->owner);
+			bool unlinked = false;
+			for (SourcesByOwner::iterator ownerIt = sources.first; ownerIt != sources.second; ++ownerIt)
+				if (ownerIt->second == item) {
+					m_SourcesByOwner.erase(ownerIt);
+					unlinked = true;
+					break;
+				}
+			ASSERT(unlinked);
+			removeItems.insert(item);
 			it = m_ListItems.erase(it);
-
-			// Remove it from the CListCtrl
-			LVFINDINFO find;
-			find.flags = LVFI_PARAM;
-			find.lParam = (LPARAM)delItem;
-			int iItem = FindItem(&find);
-			if (iItem >= 0)
-				DeleteItem(iItem);
-
-			// finally it could be deleted
-			delete delItem;
 		} else
 			++it;
 	}
+	if (removeItems.empty())
+		return;
+
+	// Delete backwards to keep earlier row indices stable. Always scan
+	// rather than relying on source visibility flags: if those are stale,
+	// skipping a row would leave a dangling list-view pointer.
+	SetRedraw(false);
+	for (int i = GetItemCount(); --i >= 0;) {
+		const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(GetItemData(i));
+		if (item != NULL && removeItems.find(item) != removeItems.end())
+			DeleteItem(i);
+	}
+	SetRedraw(true);
+
+	// Only release objects after no list-view row can refer to them.
+	for (std::unordered_set<const CtrlItem_Struct*>::const_iterator it = removeItems.begin();
+		it != removeItems.end(); ++it)
+		delete *it;
 }
 
 bool CDownloadListCtrl::RemoveFile(const CPartFile *toremove)
 {
-	bool bResult = false;
-	if (theApp.IsClosing())
-		return bResult;
-	// Retrieve all entries matching the File or linked to the file
-	// Remark: The 'asked another files' clients must be removed from here
-	ASSERT(toremove != NULL);
+	if (theApp.IsClosing() || toremove == NULL)
+		return false;
+
+	// Collect all list entries for this file, including A4AF/available sources,
+	// while unlinking them from the multimap. Do not free their memory yet:
+	// the list-view still holds the pointers until its rows are deleted.
+	std::unordered_set<const CtrlItem_Struct*> removeItems;
 	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end();) {
-		const CtrlItem_Struct *delItem = it->second;
-		if (delItem->owner == toremove || delItem->value == (void*)toremove) {
-			// Remove it from the m_ListItems
+		const CtrlItem_Struct *item = it->second;
+		if (item->owner == toremove || item->value == (void*)toremove) {
+			removeItems.insert(item);
 			it = m_ListItems.erase(it);
-
-			// Remove it from the CListCtrl
-			LVFINDINFO find;
-			find.flags = LVFI_PARAM;
-			find.lParam = (LPARAM)delItem;
-			int iItem = FindItem(&find);
-			if (iItem >= 0)
-				DeleteItem(iItem);
-
-			// finally, it could be deleted
-			delete delItem;
-			bResult = true;
 		} else
 			++it;
 	}
-	ShowFilesCount();
-	return bResult;
+	if (removeItems.empty())
+		return false;
+
+	// Every indexed source for this file has just been unlinked from
+	// m_ListItems; erase the parallel, non-owning owner index as well.
+	m_SourcesByOwner.erase(const_cast<CPartFile*>(toremove));
+
+	// One pass through visible rows replaces FindItem's full search for every
+	// linked source. Delete backwards so earlier indexes remain stable.
+	SetRedraw(false);
+	int removedVisibleFiles = 0;
+	for (int i = GetItemCount(); --i >= 0;) {
+		const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(GetItemData(i));
+		if (item != NULL && removeItems.find(item) != removeItems.end()) {
+			const bool isFile = item->type == FILE_TYPE;
+			if (DeleteItem(i) && isFile)
+				++removedVisibleFiles;
+		}
+	}
+	SetRedraw(true);
+
+	for (std::unordered_set<const CtrlItem_Struct*>::const_iterator it = removeItems.begin();
+		it != removeItems.end(); ++it)
+		delete *it;
+
+	// The visible-row counter was already maintained on every insertion.
+	// Count only rows Windows actually deleted, without rescanning the
+	// entire multimap for each removed file in a large queue.
+	ASSERT(removedVisibleFiles <= m_nVisibleFileCount);
+	m_nVisibleFileCount = removedVisibleFiles <= m_nVisibleFileCount
+		? m_nVisibleFileCount - removedVisibleFiles : 0;
+	ReportVisibleFileCount();
+	return true;
 }
 
 void CDownloadListCtrl::UpdateItem(void *toupdate)
@@ -367,6 +425,18 @@ void CDownloadListCtrl::UpdateItem(void *toupdate)
 	// Retrieve all entries matching the source
 	for (ListItems::const_iterator it = m_ListItems.lower_bound(toupdate); it != m_ListItems.end() && it->first == toupdate; ++it) {
 		CtrlItem_Struct *updateItem = it->second;
+
+		// Hidden source rows are by far the common case with large queues.
+		// They cannot need a list-view lookup, repaint or sort update.
+		// The source bitmap is invalidated when it is hidden by HideSources.
+		if (updateItem->type != FILE_TYPE) {
+			if (updateItem->owner == NULL || !updateItem->owner->srcarevisible)
+				continue;
+		} else {
+			CPartFile *partfile = static_cast<CPartFile*>(updateItem->value);
+			if (partfile == NULL || !partfile->CheckShowItemInGivenCat(m_curTab))
+				continue;
+		}
 
 		// Find entry in CListCtrl and update object
 		LVFINDINFO find;
@@ -738,8 +808,12 @@ void CDownloadListCtrl::DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct)
 		dc.SetBoundsRect(&tree_rect, DCB_DISABLE);
 
 		//gather some information
-		bool hasNext = (lpDrawItemStruct->itemID + 1 < (UINT)GetItemCount() //not the last line
-			&& reinterpret_cast<CtrlItem_Struct*>(GetItemData(lpDrawItemStruct->itemID + 1))->type != FILE_TYPE); //source line
+		const CtrlItem_Struct *nextItem = lpDrawItemStruct->itemID + 1 < (UINT)GetItemCount()
+			? reinterpret_cast<const CtrlItem_Struct*>(GetItemData(lpDrawItemStruct->itemID + 1)) : NULL;
+		// A missing row must never be dereferenced during painting. A source
+		// from another owner must not be drawn as part of this file's tree.
+		const bool hasNext = nextItem != NULL && nextItem->type != FILE_TYPE
+			&& nextItem->owner == (isChild ? content->owner : static_cast<CPartFile*>(content->value));
 		//bool isExpandable = !isChild && static_cast<CPartFile*>(content->value)->GetSourceCount() > 0;
 		//might as well calculate these now
 		int treeCenter = tree_start + 3;
@@ -788,6 +862,12 @@ void CDownloadListCtrl::HideSources(CPartFile *toCollapse)
 	if (!toCollapse->srcarevisible)
 		return;
 	SetRedraw(false);
+
+	// Do not assume that source rows are contiguous: unexpected sort/reorder
+	// states must not leave dangling rows pointing to a hidden or deleted
+	// source. GetItemData is now constant-time in CDownloadListCtrl, so the
+	// comprehensive backwards scan no longer performs linked-list lookups
+	// for every visible row.
 	for (int i = GetItemCount(); --i >= 0;) {
 		CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(GetItemData(i));
 		if (item != NULL && item->owner == toCollapse) {
@@ -835,15 +915,23 @@ void CDownloadListCtrl::ExpandCollapseItem(int iItem, int iAction, bool bCollaps
 		if (iAction > COLLAPSE_ONLY) {
 			SetRedraw(false);
 
-			// Go through the whole list to find out the sources for this file
-			// Remark: don't use GetSourceCount() => UNAVAILABLE_SOURCE
-			for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
+			// Iterate only sources for this file, including unavailable A4AF
+			// sources. With 10,000 downloads, the old traversal scanned the
+			// entire global client map each time a single branch was expanded.
+			bool insertionFailed = false;
+			std::pair<SourcesByOwner::iterator, SourcesByOwner::iterator> sources = m_SourcesByOwner.equal_range(partfile);
+			for (SourcesByOwner::iterator it = sources.first; it != sources.second; ++it) {
 				const CtrlItem_Struct *cur_item = it->second;
-				if (cur_item->owner == partfile) {
-					partfile->srcarevisible = true;
-					InsertItem(LVIF_TEXT | LVIF_PARAM, iItem + 1, LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)cur_item);
+				if (InsertItem(LVIF_TEXT | LVIF_PARAM, iItem + 1, LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)cur_item) < 0) {
+					insertionFailed = true;
+					break;
 				}
+				partfile->srcarevisible = true;
 			}
+			// Never report an expanded branch with only a subset of its rows
+			// after the Windows list view rejects an insertion.
+			if (insertionFailed && partfile->srcarevisible)
+				HideSources(partfile);
 
 			SetRedraw(true);
 		}
@@ -1630,35 +1718,73 @@ void CDownloadListCtrl::ClearCompleted(int incat)
 	if (incat == -2)
 		incat = m_curTab;
 
-	// Search for completed file(s)
-	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end();) {
-		const CtrlItem_Struct *cur_item = it->second;
-		++it; // Already point to the next iterator.
-		if (cur_item->type == FILE_TYPE) {
-			CPartFile *file = static_cast<CPartFile*>(cur_item->value);
-			if (!file->IsPartFile() && (file->CheckShowItemInGivenCat(incat) || incat == -1))
-				if (RemoveFile(file))
-					it = m_ListItems.begin();
+	// Remove all completed files in one batch. Restarting m_ListItems from
+	// begin() after each deletion used to rescan the entire map for every
+	// completed file; RemoveFile also scanned the visible list every time.
+	std::unordered_set<const CPartFile*> completed;
+	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
+		const CtrlItem_Struct *item = it->second;
+		if (item->type == FILE_TYPE) {
+			CPartFile *file = static_cast<CPartFile*>(item->value);
+			if (!file->IsPartFile() && (incat == -1 || file->CheckShowItemInGivenCat(incat)))
+				completed.insert(file);
 		}
 	}
+
+	if (!completed.empty()) {
+		std::unordered_set<const CtrlItem_Struct*> removeItems;
+		for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end();) {
+			const CtrlItem_Struct *item = it->second;
+			const CPartFile *owner = item->type == FILE_TYPE
+				? static_cast<CPartFile*>(item->value) : item->owner;
+			if (owner != NULL && completed.find(owner) != completed.end()) {
+				removeItems.insert(item);
+				it = m_ListItems.erase(it);
+			} else
+				++it;
+		}
+
+		for (std::unordered_set<const CPartFile*>::const_iterator it = completed.begin();
+			it != completed.end(); ++it)
+			m_SourcesByOwner.erase(const_cast<CPartFile*>(*it));
+
+		// Remove rows first, then free the source and file objects; Windows
+		// must never retain a list-view lParam to an already freed object.
+		SetRedraw(false);
+		int removedVisibleFiles = 0;
+		for (int i = GetItemCount(); --i >= 0;) {
+			const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(GetItemData(i));
+			if (item != NULL && removeItems.find(item) != removeItems.end()) {
+				const bool isFile = item->type == FILE_TYPE;
+				if (DeleteItem(i) && isFile)
+					++removedVisibleFiles;
+			}
+		}
+		SetRedraw(true);
+
+		for (std::unordered_set<const CtrlItem_Struct*>::const_iterator it = removeItems.begin();
+			it != removeItems.end(); ++it)
+			delete *it;
+
+		ASSERT(removedVisibleFiles <= m_nVisibleFileCount);
+		m_nVisibleFileCount = removedVisibleFiles <= m_nVisibleFileCount
+			? m_nVisibleFileCount - removedVisibleFiles : 0;
+		ReportVisibleFileCount();
+	}
+
 	if (thePrefs.ShowCatTabInfos())
 		theApp.emuledlg->transferwnd->UpdateCatTabTitles();
 }
 
 void CDownloadListCtrl::ClearCompleted(const CPartFile *pFile)
 {
-	if (pFile->IsPartFile())
+	if (pFile == NULL || pFile->IsPartFile())
 		return;
-	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
-		const CtrlItem_Struct *cur_item = it->second;
-		if (cur_item->type == FILE_TYPE) {
-			const CPartFile *pCurFile = static_cast<CPartFile*>(cur_item->value);
-			if (pCurFile == pFile) {
-				RemoveFile(pCurFile);
-				return;
-			}
-		}
-	}
+
+	// The file itself is indexed under its CPartFile pointer.
+	ListItems::const_iterator it = m_ListItems.find(const_cast<CPartFile*>(pFile));
+	if (it != m_ListItems.end() && it->second->type == FILE_TYPE && it->second->value == pFile)
+		RemoveFile(pFile);
 }
 
 void CDownloadListCtrl::SetStyle()
@@ -1672,12 +1798,25 @@ void CDownloadListCtrl::SetStyle()
 void CDownloadListCtrl::OnListModified(LPNMHDR pNMHDR, LRESULT* /*pResult*/)
 {
 	LPNMLISTVIEW pNMListView = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
-
-	//this works because 'true' equals 1, and 'false' equals 0
-	int notLast = static_cast<int>(pNMListView->iItem + 1 != GetItemCount());
-	int notFirst = static_cast<int>(pNMListView->iItem != 0);
-	RedrawItems(pNMListView->iItem - notFirst, pNMListView->iItem + notLast);
 	m_availableCommandsDirty = true;
+
+	// The common control already repaints state-only selection/focus changes.
+	// Redrawing neighbouring rows for every Shift+Arrow selection update adds
+	// avoidable UI work when a download queue contains thousands of entries.
+	if (pNMHDR->code == LVN_ITEMCHANGED
+		&& pNMListView->uChanged == LVIF_STATE
+		&& ((pNMListView->uNewState ^ pNMListView->uOldState)
+			& ~(LVIS_SELECTED | LVIS_FOCUSED)) == 0)
+		return;
+
+	// LVN_ITEMCHANGED may report iItem == -1 for a whole-list change.
+	// Never pass an invalid or inverted range to RedrawItems.
+	const int itemCount = GetItemCount();
+	const int item = pNMListView->iItem;
+	if (item < 0 || item >= itemCount)
+		return;
+	RedrawItems(item > 0 ? item - 1 : item,
+		item + 1 < itemCount ? item + 1 : item);
 }
 
 int CDownloadListCtrl::Compare(const CPartFile *file1, const CPartFile *file2, LPARAM lParamSort)
@@ -2076,7 +2215,8 @@ CString CDownloadListCtrl::GetFileItemDisplayText(const CPartFile *lpPartFile, i
 
 void CDownloadListCtrl::ShowFilesCount()
 {
-	theApp.emuledlg->transferwnd->UpdateFilesCount(GetFilesCountInCurCat());
+	m_nVisibleFileCount = GetFilesCountInCurCat();
+	theApp.emuledlg->transferwnd->UpdateFilesCount(m_nVisibleFileCount);
 }
 
 void CDownloadListCtrl::ShowSelectedFileDetails()
@@ -2141,25 +2281,60 @@ void CDownloadListCtrl::UpdateCurrentCategoryView(CPartFile *thisfile)
 				HideFile(it);
 		}
 	}
+	// Visibility changes are tracked incrementally by ShowFile/HideFile.
+	theApp.emuledlg->transferwnd->UpdateFilesCount(m_nVisibleFileCount);
 }
 
 void CDownloadListCtrl::ChangeCategory(int newsel)
 {
 	SetRedraw(false);
 
-	// show the files of the selected category, remove all others
-	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
-		const CtrlItem_Struct *cur_item = it->second;
-		if (cur_item->type == FILE_TYPE)
-			if (static_cast<CPartFile*>(cur_item->value)->CheckShowItemInGivenCat(newsel))
-				ShowFile(it);
-			else
-				HideFile(it);
+	// Keep rows that remain visible and remove rows which no longer belong
+	// to the selected category in a single backwards pass. The old path
+	// called ShowFile/HideFile (which search all visible rows) for each
+	// download. Individual DeleteItem calls still cost time in the base
+	// control; do not claim the entire category switch is linear.
+	std::unordered_set<const CtrlItem_Struct*> visibleFiles;
+	int visibleFileCount = 0;
+	for (int i = GetItemCount(); --i >= 0;) {
+		CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(GetItemData(i));
+		if (item == NULL)
+			continue;
+
+		CPartFile *owner = item->type == FILE_TYPE
+			? static_cast<CPartFile*>(item->value) : item->owner;
+		if (owner != NULL && !owner->CheckShowItemInGivenCat(newsel)) {
+			if (item->type == FILE_TYPE)
+				owner->srcarevisible = false;
+			else {
+				item->dwUpdated = 0;
+				item->status.DeleteObject();
+			}
+			DeleteItem(i);
+		} else if (item->type == FILE_TYPE) {
+			visibleFiles.insert(item);
+			++visibleFileCount;
+		}
 	}
 
-	SetRedraw(true);
+	// Retain existing file rows, including their selection, focus and
+	// expanded sources; append only newly visible files.
+	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
+		const CtrlItem_Struct *item = it->second;
+		if (item->type == FILE_TYPE
+			&& visibleFiles.find(item) == visibleFiles.end()
+			&& static_cast<CPartFile*>(item->value)->CheckShowItemInGivenCat(newsel))
+			if (InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK,
+				0, 0, 0, (LPARAM)item) >= 0)
+				++visibleFileCount;
+	}
+
 	m_curTab = newsel;
-	ShowFilesCount();
+	// We already visited every visible file in this pass. Report only
+	// rows that Windows actually retained/inserted (including failures).
+	m_nVisibleFileCount = visibleFileCount;
+	ReportVisibleFileCount();
+	SetRedraw(true);
 }
 
 void CDownloadListCtrl::HideFile(ListItems::const_iterator ihide)
@@ -2175,7 +2350,8 @@ void CDownloadListCtrl::HideFile(ListItems::const_iterator ihide)
 		find.lParam = (LPARAM)it->second;
 		int iItem = FindItem(&find);
 		if (iItem >= 0) {
-			DeleteItem(iItem);
+			if (DeleteItem(iItem))
+				--m_nVisibleFileCount;
 			return;
 		}
 	}
@@ -2189,8 +2365,8 @@ void CDownloadListCtrl::ShowFile(ListItems::const_iterator ishow)
 	LVFINDINFO find;
 	find.flags = LVFI_PARAM;
 	find.lParam = (LPARAM)updateItem;
-	if (FindItem(&find) == -1)
-		InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)updateItem);
+	if (FindItem(&find) == -1 && InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)updateItem) >= 0)
+		++m_nVisibleFileCount;
 }
 
 void CDownloadListCtrl::GetDisplayedFiles(CArray<CPartFile*> &list)
@@ -2528,7 +2704,13 @@ bool CDownloadListCtrl::ReportAvailableCommands(CList<int> &liAvailableCommands)
 {
 	const DWORD curTick = ::GetTickCount();
 
-	if (curTick < m_dwLastAvailableCommandsCheck + SEC2MS(3) && !m_availableCommandsDirty)
+	// Selection changes can generate many LVN_ITEMCHANGED events while
+	// Shift+Arrow is held. A bounded 200-ms coalescing window prevents
+	// rebuilding the expensive multi-selection command state on each event.
+	// An unchanged selection keeps the existing three-second refresh period.
+	const DWORD elapsed = curTick - m_dwLastAvailableCommandsCheck;
+	if (m_dwLastAvailableCommandsCheck != 0
+		&& elapsed < (m_availableCommandsDirty ? 200u : SEC2MS(3)))
 		return false;
 	m_dwLastAvailableCommandsCheck = curTick;
 	m_availableCommandsDirty = false;

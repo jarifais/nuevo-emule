@@ -16,6 +16,7 @@
 //Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #pragma once
 #include <map>
+#include <unordered_map>
 #include "MuleListCtrl.h"
 #include "TitledMenu.h"
 #include "ListCtrlItemWalk.h"
@@ -91,11 +92,30 @@ public:
 	CDownloadListCtrl(const CDownloadListCtrl&) = delete;
 	CDownloadListCtrl& operator=(const CDownloadListCtrl&) = delete;
 
+	// Read the row's lParam directly from the Windows list-view. The base
+	// CMuleListCtrl::GetItemData resolves the same value by FindIndex() in
+	// a linked list, which is linear in the row number. Drawing, keyboard
+	// selection and scanning many rows should not repeatedly do that work.
+	// Keep the base class's list and sort machinery unchanged.
+	DWORD_PTR GetItemData(int iItem)
+	{
+		if (iItem < 0 || iItem >= GetItemCount())
+			return 0;
+		const DWORD_PTR rowData = CListCtrl::GetItemData(iItem);
+#ifdef _DEBUG
+		// Validate the fast path against the original linked-list cache in
+		// Debug builds; Release avoids the linear comparison entirely.
+		ASSERT(rowData == CMuleListCtrl::GetItemData(iItem));
+#endif
+		return rowData;
+	}
+
 	UINT	m_curTab;
 
 	void	UpdateItem(void *toupdate);
 	void	Init();
-	void	AddFile(CPartFile *toadd);
+	void	AddFile(CPartFile *toadd, bool bNotifyCount = true);
+	void	ReportVisibleFileCount();
 	void	AddSource(CPartFile *owner, CUpDownClient *source, bool notavailable);
 	void	RemoveSource(CUpDownClient *source, CPartFile *owner);
 	bool	RemoveFile(const CPartFile *toremove);
@@ -130,12 +150,17 @@ protected:
 	typedef std::pair<void*, CtrlItem_Struct*> ListItemsPair;
 	typedef std::multimap<void*, CtrlItem_Struct*> ListItems;
 	ListItems	m_ListItems;
+	// Secondary index: expand only sources belonging to the selected file.
+	// Non-owning; pointers are freed exclusively via m_ListItems.
+	typedef std::unordered_multimap<CPartFile*, CtrlItem_Struct*> SourcesByOwner;
+	SourcesByOwner m_SourcesByOwner;
 	CFont		m_fontBold; // may contain a locally created bold font
 	CFont		*m_pFontBold;// points to the bold font which is to be used (may be the locally created or the default bold font)
 	CToolTipCtrlX m_tooltip;
 	DWORD		m_dwLastAvailableCommandsCheck;
 	bool		m_bRemainSort;
 	bool		m_availableCommandsDirty;
+	int		m_nVisibleFileCount; // maintained incrementally for frequent AddFile calls
 
 	void HideFile(ListItems::const_iterator ihide);
 	void ShowFile(ListItems::const_iterator ishow);
