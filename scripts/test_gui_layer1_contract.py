@@ -45,7 +45,10 @@ class DownloadListLayer1Contract(unittest.TestCase):
         self.assertNotIn("ShowFile(it)", fn)
         self.assertNotIn("HideFile(it)", fn)
         self.assertNotIn("FindItem(", fn)
-        self.assertIn("ShowFilesCount();", fn)
+        self.assertIn("m_nVisibleFileCount = visibleFileCount;", fn)
+        self.assertIn("ReportVisibleFileCount();", fn)
+        self.assertIn("++visibleFileCount;", fn)
+        self.assertNotIn("ShowFilesCount();", fn)
 
     def test_source_collapse_cleans_all_rows_not_only_contiguous(self):
         fn = body("void CDownloadListCtrl::HideSources(", "void CDownloadListCtrl::ExpandCollapseItem(")
