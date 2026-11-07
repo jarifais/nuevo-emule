@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 PREFS = (ROOT / "srchybrid" / "Preferences.cpp").read_text(encoding="utf-8-sig")
 APP = (ROOT / "srchybrid" / "Emule.cpp").read_text(encoding="utf-8-sig")
+HEADER = (ROOT / "srchybrid" / "Preferences.h").read_text(encoding="utf-8-sig")
 
 
 class PortableSharedDirectoryContract(unittest.TestCase):
@@ -48,6 +49,10 @@ class PortableSharedDirectoryContract(unittest.TestCase):
         self.assertIn("mutexError == ERROR_ALREADY_EXISTS", shared)
         self.assertIn("return FALSE;", shared)
         self.assertIn("::CloseHandle(s_hOriginalEmuleGuard);", APP)
+        self.assertIn("GetPortableDefaultDirectory(EMULE_TEMPDIR)", APP)
+        self.assertIn("GetPortableDefaultDirectory(EMULE_INCOMINGDIR)", APP)
+        self.assertIn("GetPortableDefaultDirectory(EDefaultDirectory eDirectory)", HEADER)
+        self.assertNotIn("thePrefs.GetDefaultDirectory(", APP)
 
     def test_isolation_and_normal_defaults_remain(self):
         self.assertIn("if (IsPortableMode()) {", PREFS)
