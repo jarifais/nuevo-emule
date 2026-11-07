@@ -133,7 +133,7 @@ class DownloadListLayer1Contract(unittest.TestCase):
         self.assertIn("m_SourcesByOwner.erase(", fn)
         self.assertLess(fn.index("it = m_ListItems.erase(it)"), fn.index("DeleteItem(i)"))
         self.assertLess(fn.index("DeleteItem(i)"), fn.index("delete *it"))
-        self.assertNotIn("it = m_ListItems.begin();", fn)
+        self.assertNotIn("if (RemoveFile(file))", fn)
         self.assertIn("m_ListItems.find(const_cast<CPartFile*>(pFile))", fn)
 
     def test_selection_command_scans_are_coalesced(self):
