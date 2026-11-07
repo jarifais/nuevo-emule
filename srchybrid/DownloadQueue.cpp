@@ -1328,67 +1328,88 @@ void CDownloadQueue::ProcessLocalRequests()
 		return;
 	CSafeMemFile dataTcpFrame(22);
 	static const int iMaxFilesPerTcpFrame = 15;
-	int iFiles = 0;
-	while (!m_localServerReqQueue.IsEmpty() && iFiles < iMaxFilesPerTcpFrame) {
-		// find the file with the longest waiting time
-		DWORD dwBestWaitTime = _UI32_MAX;
-		POSITION posNextRequest = NULL;
-		for (POSITION pos = m_localServerReqQueue.GetHeadPosition(); pos != NULL;) {
-			POSITION pos2 = pos;
-			CPartFile *cur_file = m_localServerReqQueue.GetNext(pos);
-			if (cur_file->GetStatus() == PS_READY || cur_file->GetStatus() == PS_EMPTY) {
-				uint8 nPriority = cur_file->GetDownPriority();
-				ASSERT(nPriority <= PR_HIGH);
-				nPriority = (nPriority >= PR_HIGH) ? 0 : PR_HIGH - nPriority;
-				if (cur_file->m_LastSearchTime + nPriority < dwBestWaitTime) {
-					dwBestWaitTime = cur_file->m_LastSearchTime + nPriority;
-					posNextRequest = pos2;
-				}
-			} else {
-				m_localServerReqQueue.RemoveAt(pos2);
-				cur_file->m_bLocalSrcReqQueued = false;
-				if (thePrefs.GetDebugSourceExchange())
-					AddDebugLogLine(false, _T("SXSend: Local server source request for file \"%s\" not sent because of status '%s'"), (LPCTSTR)cur_file->GetFileName(), (LPCTSTR)cur_file->getPartfileStatus());
-			}
-		}
 
-		if (posNextRequest != NULL) {
-			CPartFile *cur_file = m_localServerReqQueue.GetAt(posNextRequest);
+	// Select the next TCP frame from a single snapshot of pending requests.
+	// Previously the entire queue was rescanned up to 15 times per frame.
+	// List positions stay valid while other nodes are removed.
+	struct RequestCandidate {
+		POSITION position;
+		DWORD score;
+	};
+	std::vector<RequestCandidate> candidates;
+	candidates.reserve(static_cast<size_t>(m_localServerReqQueue.GetCount()));
+	for (POSITION pos = m_localServerReqQueue.GetHeadPosition(); pos != NULL;) {
+		POSITION requestPos = pos;
+		CPartFile *cur_file = m_localServerReqQueue.GetNext(pos);
+		const EPartFileStatus status = cur_file->GetStatus();
+		if (status == PS_READY || status == PS_EMPTY) {
+			uint8 priority = cur_file->GetDownPriority();
+			ASSERT(priority <= PR_HIGH);
+			priority = (priority >= PR_HIGH) ? 0 : PR_HIGH - priority;
+			const DWORD score = cur_file->m_LastSearchTime + priority;
+			// The original exclusive sentinel must remain ineligible.
+			if (score != _UI32_MAX)
+				candidates.push_back(RequestCandidate{requestPos, score});
+		} else {
+			m_localServerReqQueue.RemoveAt(requestPos);
 			cur_file->m_bLocalSrcReqQueued = false;
-			cur_file->m_LastSearchTime = curTick;
-			m_localServerReqQueue.RemoveAt(posNextRequest);
-
-			if (cur_file->IsLargeFile() && (theApp.serverconnect->GetCurrentServer() == NULL || !theApp.serverconnect->GetCurrentServer()->SupportsLargeFilesTCP())) {
-				ASSERT(0);
-				DebugLogError(_T("Large file (%s) requested from local server without support for large files"), (LPCTSTR)cur_file->GetFileName());
-				continue;
-			}
-
-			++iFiles;
-
-			// create request packet
-			CSafeMemFile smPacket;
-			smPacket.WriteHash16(cur_file->GetFileHash());
-			if (cur_file->IsLargeFile()) {
-				smPacket.WriteUInt32(0); // indicates that this is a large file and a uint64 follows
-				smPacket.WriteUInt64(cur_file->GetFileSize());
-			} else
-				smPacket.WriteUInt32((uint32)(uint64)cur_file->GetFileSize());
-
-			uint8 byOpcode;
-			if (thePrefs.IsCryptLayerEnabled() && theApp.serverconnect->GetCurrentServer() != NULL && theApp.serverconnect->GetCurrentServer()->SupportsGetSourcesObfuscation())
-				byOpcode = OP_GETSOURCES_OBFU;
-			else
-				byOpcode = OP_GETSOURCES;
-
-			Packet packet(smPacket, OP_EDONKEYPROT, byOpcode);
-			if (thePrefs.GetDebugServerTCPLevel() > 0)
-				Debug(_T(">>> Sending OP_GetSources%s(%2u/%2u); %s\n"), (byOpcode == OP_GETSOURCES) ? _T("") : _T("_OBFU"), iFiles, iMaxFilesPerTcpFrame, (LPCTSTR)DbgGetFileInfo(cur_file->GetFileHash()));
-			dataTcpFrame.Write(packet.GetPacket(), packet.GetRealPacketSize());
-
 			if (thePrefs.GetDebugSourceExchange())
-				AddDebugLogLine(false, _T("SXSend: Local server source request; File=\"%s\""), (LPCTSTR)cur_file->GetFileName());
+				AddDebugLogLine(false, _T("SXSend: Local server source request for file \"%s\" not sent because of status '%s'"), (LPCTSTR)cur_file->GetFileName(), (LPCTSTR)cur_file->getPartfileStatus());
 		}
+	}
+
+	// Stable ordering preserves the old first-in-queue tie-break.
+	std::stable_sort(candidates.begin(), candidates.end(),
+		[](const RequestCandidate &left, const RequestCandidate &right) {
+			return left.score < right.score;
+		});
+
+	int iFiles = 0;
+	for (size_t i = 0; i < candidates.size() && iFiles < iMaxFilesPerTcpFrame; ++i) {
+		CPartFile *cur_file = m_localServerReqQueue.GetAt(candidates[i].position);
+		const EPartFileStatus status = cur_file->GetStatus();
+		if (status != PS_READY && status != PS_EMPTY) {
+			// Retain the legacy status check before sending.
+			m_localServerReqQueue.RemoveAt(candidates[i].position);
+			cur_file->m_bLocalSrcReqQueued = false;
+			if (thePrefs.GetDebugSourceExchange())
+				AddDebugLogLine(false, _T("SXSend: Local server source request for file \"%s\" not sent because of status '%s'"), (LPCTSTR)cur_file->GetFileName(), (LPCTSTR)cur_file->getPartfileStatus());
+			continue;
+		}
+		cur_file->m_bLocalSrcReqQueued = false;
+		cur_file->m_LastSearchTime = curTick;
+		m_localServerReqQueue.RemoveAt(candidates[i].position);
+
+		if (cur_file->IsLargeFile() && (theApp.serverconnect->GetCurrentServer() == NULL || !theApp.serverconnect->GetCurrentServer()->SupportsLargeFilesTCP())) {
+			ASSERT(0);
+			DebugLogError(_T("Large file (%s) requested from local server without support for large files"), (LPCTSTR)cur_file->GetFileName());
+			continue;
+		}
+
+		++iFiles;
+
+		// create request packet
+		CSafeMemFile smPacket;
+		smPacket.WriteHash16(cur_file->GetFileHash());
+		if (cur_file->IsLargeFile()) {
+			smPacket.WriteUInt32(0); // indicates that this is a large file and a uint64 follows
+			smPacket.WriteUInt64(cur_file->GetFileSize());
+		} else
+			smPacket.WriteUInt32((uint32)(uint64)cur_file->GetFileSize());
+
+		uint8 byOpcode;
+		if (thePrefs.IsCryptLayerEnabled() && theApp.serverconnect->GetCurrentServer() != NULL && theApp.serverconnect->GetCurrentServer()->SupportsGetSourcesObfuscation())
+			byOpcode = OP_GETSOURCES_OBFU;
+		else
+			byOpcode = OP_GETSOURCES;
+
+		Packet packet(smPacket, OP_EDONKEYPROT, byOpcode);
+		if (thePrefs.GetDebugServerTCPLevel() > 0)
+			Debug(_T(">>> Sending OP_GetSources%s(%2u/%2u); %s\n"), (byOpcode == OP_GETSOURCES) ? _T("") : _T("_OBFU"), iFiles, iMaxFilesPerTcpFrame, (LPCTSTR)DbgGetFileInfo(cur_file->GetFileHash()));
+		dataTcpFrame.Write(packet.GetPacket(), packet.GetRealPacketSize());
+
+		if (thePrefs.GetDebugSourceExchange())
+			AddDebugLogLine(false, _T("SXSend: Local server source request; File=\"%s\""), (LPCTSTR)cur_file->GetFileName());
 	}
 
 	int iSize = (int)dataTcpFrame.GetLength();
