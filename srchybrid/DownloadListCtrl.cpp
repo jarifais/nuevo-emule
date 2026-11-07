@@ -312,26 +312,38 @@ void CDownloadListCtrl::RemoveSource(CUpDownClient *source, CPartFile *owner)
 	if (theApp.IsClosing())
 		return;
 
-	// Retrieve all entries matching the source
-	for (ListItems::const_iterator it = m_ListItems.lower_bound(source); it != m_ListItems.end() && it->first == source;) {
-		const CtrlItem_Struct *delItem = it->second;
-		if (owner == NULL || owner == delItem->owner) {
-			// Remove it from the m_ListItems
+	// A client may be listed under multiple files (A4AF). Collect every
+	// matching entry before touching the list-view: repeated FindItem scans
+	// become expensive with large queues, and rows must not retain pointers
+	// to freed CtrlItem_Struct objects.
+	std::unordered_set<const CtrlItem_Struct*> removeItems;
+	for (ListItems::const_iterator it = m_ListItems.lower_bound(source);
+		it != m_ListItems.end() && it->first == source;) {
+		const CtrlItem_Struct *item = it->second;
+		if (owner == NULL || owner == item->owner) {
+			removeItems.insert(item);
 			it = m_ListItems.erase(it);
-
-			// Remove it from the CListCtrl
-			LVFINDINFO find;
-			find.flags = LVFI_PARAM;
-			find.lParam = (LPARAM)delItem;
-			int iItem = FindItem(&find);
-			if (iItem >= 0)
-				DeleteItem(iItem);
-
-			// finally it could be deleted
-			delete delItem;
 		} else
 			++it;
 	}
+	if (removeItems.empty())
+		return;
+
+	// Delete backwards to keep earlier row indices stable. Always scan
+	// rather than relying on source visibility flags: if those are stale,
+	// skipping a row would leave a dangling list-view pointer.
+	SetRedraw(false);
+	for (int i = GetItemCount(); --i >= 0;) {
+		const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(GetItemData(i));
+		if (item != NULL && removeItems.find(item) != removeItems.end())
+			DeleteItem(i);
+	}
+	SetRedraw(true);
+
+	// Only release objects after no list-view row can refer to them.
+	for (std::unordered_set<const CtrlItem_Struct*>::const_iterator it = removeItems.begin();
+		it != removeItems.end(); ++it)
+		delete *it;
 }
 
 bool CDownloadListCtrl::RemoveFile(const CPartFile *toremove)
