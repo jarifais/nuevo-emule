@@ -686,6 +686,10 @@ public:
 	static LPCTSTR	GetConfigFile();
 	static const CString& GetFileCommentsFilePath()		{ return m_strFileCommentsFilePath; }
 	static CString	GetMuleDirectory(EDefaultDirectory eDirectory, bool bCreate = true);
+	// Query the isolated portable default without mutating the saved paths.
+	// GetDefaultDirectory is protected; startup exclusion checks use this wrapper.
+	static CString	GetPortableDefaultDirectory(EDefaultDirectory eDirectory)
+		{ ASSERT(IsPortableMode()); return GetDefaultDirectory(eDirectory, false); }
 	static void		SetMuleDirectory(EDefaultDirectory eDirectory, const CString &strNewDir);
 	static void		ChangeUserDirMode(int nNewMode);
 
