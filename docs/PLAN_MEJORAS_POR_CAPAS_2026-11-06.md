@@ -23,7 +23,9 @@
 - **Actualizaciones ocultas — commit 68e157d:** `UpdateItem` evita búsquedas y repintados de archivos fuera de la categoría y de fuentes contraídas.
 - **Eliminación con fuentes — commit 90517d2:** `RemoveFile` retira en dos fases filas y entradas del mapa, evitando búsquedas visuales repetidas y liberando memoria solo después de borrar las filas.
 - **Desplazamiento y recursos gráficos — commit fc685dc:** `CMuleListCtrl::OnLvnEndScrollList` ya no deja sin liberar el contexto de dibujo obtenido al llegar al final; utiliza `CClientDC` con liberación automática, comprueba el resultado de `GetItemRect` y evita usar el índice `-1` en listas vacías. Es un defecto confirmado por lectura del código, pero **no se puede asegurar que fuera el origen del bloqueo concreto del usuario**.
-- **Pruebas estáticas — siete contratos:** `scripts/test_gui_layer1_contract.py` comprueba las invariantes básicas de las correcciones, incluida la liberación del contexto de dibujo. Deben mantenerse complementadas con MSBuild y pruebas de interfaz en Windows.
+- **Contador de inserción — commit 4d4ebb3:** `AddFile` incrementa el número de filas visibles solamente cuando el control Windows acepta la nueva fila. Evita un desajuste si `InsertItem` falla; no cambia la ubicación de las descargas.
+- **Eliminación de fuentes — commit 87090bd:** `RemoveSource` desconecta del mapa las entradas del cliente, retira las filas visibles en un barrido inverso y solo entonces libera los objetos. Conserva el filtro por archivo propietario y la eliminación global de fuentes A4AF; reduce búsquedas visuales repetidas.
+- **Pruebas estáticas — nueve contratos:** `scripts/test_gui_layer1_contract.py` comprueba las invariantes básicas de las correcciones, incluida la liberación del contexto de dibujo, el recuento ante inserciones fallidas y el orden seguro de eliminación de fuentes. Deben mantenerse complementadas con MSBuild y pruebas de interfaz en Windows.
 
 **Estado de validación:** los cambios están implementados en la rama. La compilación del último commit y las pruebas funcionales con dos instancias, 10.000 descargas y selección prolongada aún deben verificarse. Ninguna mejora porcentual está medida. El origen del bloqueo original todavía no se ha diagnosticado con un registro de excepción.
 - Se mantienen las correcciones previas del redibujado de selección y del contador visible; no duplicarlas.
@@ -46,3 +48,11 @@
 - No proclamar aceleraciones cuantificadas sin benchmark ni afirmar seguridad total por ausencia de errores de compilación.
 - Cambios pequeños y reversibles; no modificar protocolos ni formatos persistentes en la capa 1.
 - La capa 1 continúa abierta: quedan por revisar las búsquedas `FindItem` en `UpdateItem`, `RemoveFile` y `ShowFile/HideFile`, la respuesta a selección masiva y los repintados de los controles.
+
+## Pruebas adicionales de regresión para eliminación de fuentes
+
+- Mantener un cliente A4AF compartido en dos descargas expandidas; retirar solo una asociación (`owner != NULL`) y confirmar que la otra persiste.
+- Retirar el cliente por completo (`owner == NULL`), con fuentes visibles y contraídas; no deben quedar filas huérfanas ni producirse fallos en el repintado.
+- Repetir las operaciones mientras otra descarga permanece activa y después de ordenar/cambiar de categoría, verificando que la transferencia no se interrumpe.
+- Medir las retiradas de fuentes con 0, 1, 1.000 y más de 10.000 descargas; la ausencia de `FindItem` repetidos es una mejora de algoritmo, no una cifra de aceleración medida.
+- La validación funcional en Windows del último commit sigue siendo obligatoria antes de fusionar a `main`.
