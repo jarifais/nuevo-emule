@@ -111,7 +111,7 @@ void CDownloadQueue::Init()
 				filelist.AddTail(toadd); // to download queue
 				if (toadd->GetStatus(true) == PS_READY)
 					theApp.sharedfiles->SafeAddKFile(toadd); // part files are always shared files
-				theApp.emuledlg->transferwnd->GetDownloadList().AddFile(toadd); // show in download window
+				theApp.emuledlg->transferwnd->GetDownloadList().AddFile(toadd, false); // show in download window
 			} else
 				delete toadd;
 		}
@@ -141,7 +141,7 @@ void CDownloadQueue::Init()
 					filelist.AddTail(toadd);			// to download queue
 					if (toadd->GetStatus(true) == PS_READY)
 						theApp.sharedfiles->SafeAddKFile(toadd); // part files are always shared files
-					theApp.emuledlg->transferwnd->GetDownloadList().AddFile(toadd);// show in downloads window
+					theApp.emuledlg->transferwnd->GetDownloadList().AddFile(toadd, false);// show in downloads window
 
 					AddLogLine(false, GetResString(IDS_RECOVERED_PARTMET), (LPCTSTR)toadd->GetFileName());
 					toadd = NULL;
@@ -151,6 +151,9 @@ void CDownloadQueue::Init()
 		}
 		ff.Close();
 	}
+	// Report the final count only once after recovering potentially thousands
+	// of .part.met entries; this avoids repeated caption repaints at startup.
+	theApp.emuledlg->transferwnd->GetDownloadList().ReportVisibleFileCount();
 	if (count == 0)
 		AddLogLine(false, GetResString(IDS_NOPARTSFOUND));
 	else {
