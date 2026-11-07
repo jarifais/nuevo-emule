@@ -16,6 +16,7 @@
 //Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #pragma once
 #include <map>
+#include <unordered_map>
 #include "MuleListCtrl.h"
 #include "TitledMenu.h"
 #include "ListCtrlItemWalk.h"
@@ -113,7 +114,8 @@ public:
 
 	void	UpdateItem(void *toupdate);
 	void	Init();
-	void	AddFile(CPartFile *toadd);
+	void	AddFile(CPartFile *toadd, bool bNotifyCount = true);
+	void	ReportVisibleFileCount();
 	void	AddSource(CPartFile *owner, CUpDownClient *source, bool notavailable);
 	void	RemoveSource(CUpDownClient *source, CPartFile *owner);
 	bool	RemoveFile(const CPartFile *toremove);
@@ -148,6 +150,10 @@ protected:
 	typedef std::pair<void*, CtrlItem_Struct*> ListItemsPair;
 	typedef std::multimap<void*, CtrlItem_Struct*> ListItems;
 	ListItems	m_ListItems;
+	// Secondary index: expand only sources belonging to the selected file.
+	// Non-owning; pointers are freed exclusively via m_ListItems.
+	typedef std::unordered_multimap<CPartFile*, CtrlItem_Struct*> SourcesByOwner;
+	SourcesByOwner m_SourcesByOwner;
 	CFont		m_fontBold; // may contain a locally created bold font
 	CFont		*m_pFontBold;// points to the bold font which is to be used (may be the locally created or the default bold font)
 	CToolTipCtrlX m_tooltip;
