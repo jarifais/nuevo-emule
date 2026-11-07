@@ -246,8 +246,10 @@ void CDownloadListCtrl::AddFile(CPartFile *toadd)
 	m_ListItems.emplace(toadd, newitem);
 
 	if (toadd->CheckShowItemInGivenCat(m_curTab)) {
-		InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)newitem);
-		++m_nVisibleFileCount;
+		// Failed insertions (e.g. exhausted list-view resources) must not
+		// inflate the visible count used by the Transfers tab.
+		if (InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)newitem) >= 0)
+			++m_nVisibleFileCount;
 	}
 	// AddFile is called once per recovered download. Avoid rescanning the entire
 	// queue on each insertion (quadratic work at 10,000+ downloads).
