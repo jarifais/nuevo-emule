@@ -808,8 +808,12 @@ void CDownloadListCtrl::DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct)
 		dc.SetBoundsRect(&tree_rect, DCB_DISABLE);
 
 		//gather some information
-		bool hasNext = (lpDrawItemStruct->itemID + 1 < (UINT)GetItemCount() //not the last line
-			&& reinterpret_cast<CtrlItem_Struct*>(GetItemData(lpDrawItemStruct->itemID + 1))->type != FILE_TYPE); //source line
+		const CtrlItem_Struct *nextItem = lpDrawItemStruct->itemID + 1 < (UINT)GetItemCount()
+			? reinterpret_cast<const CtrlItem_Struct*>(GetItemData(lpDrawItemStruct->itemID + 1)) : NULL;
+		// A missing row must never be dereferenced during painting. A source
+		// from another owner must not be drawn as part of this file's tree.
+		const bool hasNext = nextItem != NULL && nextItem->type != FILE_TYPE
+			&& nextItem->owner == (isChild ? content->owner : static_cast<CPartFile*>(content->value));
 		//bool isExpandable = !isChild && static_cast<CPartFile*>(content->value)->GetSourceCount() > 0;
 		//might as well calculate these now
 		int treeCenter = tree_start + 3;
@@ -2693,7 +2697,13 @@ bool CDownloadListCtrl::ReportAvailableCommands(CList<int> &liAvailableCommands)
 {
 	const DWORD curTick = ::GetTickCount();
 
-	if (curTick < m_dwLastAvailableCommandsCheck + SEC2MS(3) && !m_availableCommandsDirty)
+	// Selection changes can generate many LVN_ITEMCHANGED events while
+	// Shift+Arrow is held. A bounded 200-ms coalescing window prevents
+	// rebuilding the expensive multi-selection command state on each event.
+	// An unchanged selection keeps the existing three-second refresh period.
+	const DWORD elapsed = curTick - m_dwLastAvailableCommandsCheck;
+	if (m_dwLastAvailableCommandsCheck != 0
+		&& elapsed < (m_availableCommandsDirty ? 200u : SEC2MS(3)))
 		return false;
 	m_dwLastAvailableCommandsCheck = curTick;
 	m_availableCommandsDirty = false;
