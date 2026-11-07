@@ -431,6 +431,31 @@ BOOL CemuleApp::InitInstance()
 	const CString &sConfDir(thePrefs.GetMuleDirectory(EMULE_CONFIGDIR));
 	m_pszProfileName = _tcsdup(sConfDir + PREFINIFILE);
 	if (CPreferences::IsPortableMode()) {
+		// A disconnected USB volume must not silently replace the configured
+		// Temp folder with the empty portable default at startup. Stop before
+		// loading or saving the .part queue until the chosen paths exist again.
+		CString configuredTempDirs = GetProfileString(_T("eMule"), _T("TempDir"), _T(""));
+		const CString extraTempDirs = GetProfileString(_T("eMule"), _T("TempDirs"), _T(""));
+		if (!extraTempDirs.IsEmpty())
+			configuredTempDirs.AppendFormat(_T("|%s"), (LPCTSTR)extraTempDirs);
+		for (int pos = 0; pos >= 0;) {
+			CString directory(configuredTempDirs.Tokenize(_T("|"), pos));
+			directory.Trim();
+			if (!directory.IsEmpty() && !::PathIsDirectory(directory)) {
+				CString errorMessage;
+				errorMessage.Format(_T("No se encuentra la carpeta Temp configurada: %s. Conecta la unidad o corrige data\\config\\preferences.ini antes de iniciar nuevo-emule."), (LPCTSTR)directory);
+				AfxMessageBox(errorMessage, MB_ICONERROR);
+				return FALSE;
+			}
+		}
+		CString configuredIncomingDir = GetProfileString(_T("eMule"), _T("IncomingDir"), _T(""));
+		if (!configuredIncomingDir.IsEmpty() && !::PathIsDirectory(configuredIncomingDir)) {
+			CString errorMessage;
+			errorMessage.Format(_T("No se encuentra la carpeta Incoming configurada: %s. Conecta la unidad o corrige data\\config\\preferences.ini."), (LPCTSTR)configuredIncomingDir);
+			AfxMessageBox(errorMessage, MB_ICONERROR);
+			return FALSE;
+		}
+
 		// Fail closed if the extracted portable directory is not writable.
 		// Never fall back to the profile belonging to an installed eMule.
 		TCHAR testFile[MAX_PATH] = {};
