@@ -2295,6 +2295,7 @@ void CDownloadListCtrl::ChangeCategory(int newsel)
 	// download. Individual DeleteItem calls still cost time in the base
 	// control; do not claim the entire category switch is linear.
 	std::unordered_set<const CtrlItem_Struct*> visibleFiles;
+	int visibleFileCount = 0;
 	for (int i = GetItemCount(); --i >= 0;) {
 		CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(GetItemData(i));
 		if (item == NULL)
@@ -2310,8 +2311,10 @@ void CDownloadListCtrl::ChangeCategory(int newsel)
 				item->status.DeleteObject();
 			}
 			DeleteItem(i);
-		} else if (item->type == FILE_TYPE)
+		} else if (item->type == FILE_TYPE) {
 			visibleFiles.insert(item);
+			++visibleFileCount;
+		}
 	}
 
 	// Retain existing file rows, including their selection, focus and
@@ -2321,12 +2324,16 @@ void CDownloadListCtrl::ChangeCategory(int newsel)
 		if (item->type == FILE_TYPE
 			&& visibleFiles.find(item) == visibleFiles.end()
 			&& static_cast<CPartFile*>(item->value)->CheckShowItemInGivenCat(newsel))
-			InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK,
-				0, 0, 0, (LPARAM)item);
+			if (InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK,
+				0, 0, 0, (LPARAM)item) >= 0)
+				++visibleFileCount;
 	}
 
 	m_curTab = newsel;
-	ShowFilesCount();
+	// We already visited every visible file in this pass. Report only
+	// rows that Windows actually retained/inserted (including failures).
+	m_nVisibleFileCount = visibleFileCount;
+	ReportVisibleFileCount();
 	SetRedraw(true);
 }
 
