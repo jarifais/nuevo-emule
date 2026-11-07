@@ -392,10 +392,14 @@ bool CDownloadListCtrl::RemoveFile(const CPartFile *toremove)
 	// One pass through visible rows replaces FindItem's full search for every
 	// linked source. Delete backwards so earlier indexes remain stable.
 	SetRedraw(false);
+	int removedVisibleFiles = 0;
 	for (int i = GetItemCount(); --i >= 0;) {
 		const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(GetItemData(i));
-		if (item != NULL && removeItems.find(item) != removeItems.end())
-			DeleteItem(i);
+		if (item != NULL && removeItems.find(item) != removeItems.end()) {
+			const bool isFile = item->type == FILE_TYPE;
+			if (DeleteItem(i) && isFile)
+				++removedVisibleFiles;
+		}
 	}
 	SetRedraw(true);
 
@@ -403,9 +407,13 @@ bool CDownloadListCtrl::RemoveFile(const CPartFile *toremove)
 		it != removeItems.end(); ++it)
 		delete *it;
 
-	// Recompute the count here to preserve the original visibility semantics
-	// even if this file was absent from the selected category.
-	ShowFilesCount();
+	// The visible-row counter was already maintained on every insertion.
+	// Count only rows Windows actually deleted, without rescanning the
+	// entire multimap for each removed file in a large queue.
+	ASSERT(removedVisibleFiles <= m_nVisibleFileCount);
+	m_nVisibleFileCount = removedVisibleFiles <= m_nVisibleFileCount
+		? m_nVisibleFileCount - removedVisibleFiles : 0;
+	ReportVisibleFileCount();
 	return true;
 }
 
