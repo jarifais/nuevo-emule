@@ -26,12 +26,12 @@ param(
 $ErrorActionPreference = 'Stop'
 $cores = [Math]::Max(1, [Environment]::ProcessorCount)
 $name = [IO.Path]::GetFileNameWithoutExtension($ProcessName)
-$matches = @(Get-Process -Name $name -ErrorAction SilentlyContinue)
-if ($matches.Count -ne 1) {
-    throw "Se esperaba exactamente un proceso '$name' y hay $($matches.Count). Cierra otras instancias antes de medir."
+$instances = @(Get-Process -Name $name -ErrorAction SilentlyContinue)
+if ($instances.Count -ne 1) {
+    throw "Se esperaba exactamente un proceso '$name' y hay $($instances.Count). Cierra otras instancias antes de medir."
 }
 
-$proc = $matches[0]
+$proc = $instances[0]
 $proc.Refresh()
 if ($proc.HasExited) { throw 'El proceso ya ha terminado.' }
 
