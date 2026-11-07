@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Poder ejecutar **nuevo-emule.exe** simultáneamente con el eMule instalado, sin usar sus datos ni reemplazar o activar su ventana. Este paquete es una **compilación experimental de Windows x64 Release**, no una versión validada funcionalmente en un PC de usuario.
+En el modo aislado predeterminado, ejecutar **nuevo-emule.exe** junto al eMule instalado sin compartir datos ni reemplazar su ventana. En el modo de rutas compartidas, usar las carpetas existentes **solo después de cerrar el instalado**. Este paquete es una **compilación experimental de Windows x64 Release**, no una versión validada funcionalmente en un PC de usuario.
 
 ## Separación implementada en la rama de desarrollo
 
@@ -31,7 +31,7 @@ data/
 
 El ZIP se publica como prerelease de GitHub, **únicamente cuando su workflow Windows x64 termine correctamente**. Un release antiguo no demuestra que estas correcciones estén incluidas.
 
-## Comprobación manual obligatoria
+## Comprobación manual del modo aislado (sin compartir Temp)
 
 1. Extraer el **ZIP de la compilación que contenga estas correcciones** en una carpeta nueva, distinta de la instalación de eMule, y con permisos de escritura.
 2. Abrir el eMule instalado y dejarlo funcionando.
@@ -42,7 +42,7 @@ El ZIP se publica como prerelease de GitHub, **únicamente cuando su workflow Wi
 7. Verificar que un segundo inicio de `nuevo-emule.exe` no abre otra instancia que comparta su perfil.
 8. Comprobar conectividad si se desean descargas concurrentes; asegurarse de que los puertos TCP/UDP no coinciden.
 
-**Precaución:** no apuntar las dos instancias a los mismos `.part`/`.part.met` ni copiar a la variante experimental la cola en producción de más de 10.000 descargas. Hacer pruebas primero con archivos de prueba. No hay pruebas funcionales realizadas sobre un equipo Windows con eMule instalado de forma simultánea.
+**Precaución:** la simultaneidad descrita aquí solo corresponde al modo aislado. En el modo compartido está prohibido utilizar simultáneamente los mismos `.part`/`.part.met`. No hay pruebas funcionales realizadas sobre un equipo Windows con eMule instalado de forma simultánea.
 
 
 ## Reutilizar rutas del eMule instalado sin duplicar Temp (modo voluntario)
@@ -59,5 +59,5 @@ El ZIP se publica como prerelease de GitHub, **únicamente cuando su workflow Wi
 ## Pendiente
 
 - Confirmar el éxito de la última ejecución de compilación y que el release incluya este commit.
-- Prueba manual con las dos versiones a la vez.
+- Prueba manual de dos versiones en paralelo **solo con perfiles aislados**; en modo compartido, comprobar que no pueden abrirse a la vez.
 - Posteriores benchmarks de selección masiva, CPU, memoria, E/S y recuperación de ficheros.
