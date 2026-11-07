@@ -17,6 +17,7 @@
 #include "stdafx.h"
 #include <io.h>
 #include <algorithm>
+#include <map>
 #include <vector>
 #include "emule.h"
 #include "UpDownClient.h"
@@ -1010,8 +1011,23 @@ void CDownloadQueue::CheckDiskspace(bool bNotEnoughSpaceLeft)
 		return;
 	}
 
-	// 'bNotEnoughSpaceLeft' - avoid worse case of having already 'disk full'
-	uint64 nTotalAvailableSpaceMain = bNotEnoughSpaceLeft ? 0 : GetFreeDiskSpaceX(thePrefs.GetTempDir());
+	// 'bNotEnoughSpaceLeft' must remain a hard zero-space signal: never
+	// reuse a prior disk-space sample after the write path reports full.
+	const bool singleTempDir = thePrefs.GetTempDirCount() == 1;
+	const uint64 nTotalAvailableSpaceMain = (bNotEnoughSpaceLeft || !singleTempDir)
+		? 0 : GetFreeDiskSpaceX(thePrefs.GetTempDir());
+
+	// With multiple Temp folders, querying free space once *per file* causes
+	// thousands of filesystem calls on a large queue (especially USB SSDs).
+	// Cache by the actual directory of each .part, not just by drive letter:
+	// junctions, UNC shares and volume mount points may differ on one drive.
+	// The cache is scoped to this check only; periodic checks requery the disk.
+	struct TempPathLess {
+		bool operator()(const CString &left, const CString &right) const {
+			return left.Compare(right) < 0;
+		}
+	};
+	std::map<CString, uint64, TempPathLess> freeSpaceByTempDir;
 
 	for (POSITION pos = filelist.GetHeadPosition(); pos != NULL;) {
 		CPartFile *cur_file = filelist.GetNext(pos);
@@ -1023,8 +1039,21 @@ void CDownloadQueue::CheckDiskspace(bool bNotEnoughSpaceLeft)
 		case PS_COMPLETE:
 			break;
 		default:
-			uint64 nTotalAvailableSpace = bNotEnoughSpaceLeft ? 0 :
-				((thePrefs.GetTempDirCount() == 1) ? nTotalAvailableSpaceMain : GetFreeDiskSpaceX(cur_file->GetTmpPath()));
+			uint64 nTotalAvailableSpace = 0;
+			if (!bNotEnoughSpaceLeft) {
+				if (singleTempDir)
+					nTotalAvailableSpace = nTotalAvailableSpaceMain;
+				else {
+					const CString tempPath(cur_file->GetTmpPath());
+					std::map<CString, uint64, TempPathLess>::const_iterator cached = freeSpaceByTempDir.find(tempPath);
+					if (cached == freeSpaceByTempDir.end()) {
+						const uint64 freeSpace = GetFreeDiskSpaceX(tempPath);
+						freeSpaceByTempDir.insert(std::make_pair(tempPath, freeSpace));
+						nTotalAvailableSpace = freeSpace;
+					} else
+						nTotalAvailableSpace = cached->second;
+				}
+			}
 			if (thePrefs.GetMinFreeDiskSpace() == 0) {
 				// Pause the file only if it would grow in size and would exceed the currently available free space
 				if (cur_file->GetNeededSpace() <= nTotalAvailableSpace)
