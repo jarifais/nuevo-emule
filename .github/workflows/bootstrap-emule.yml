@@ -34,7 +34,9 @@ jobs:
       - name: Contratos estáticos de la capa 1 (no sustituye pruebas en Windows)
         if: github.ref != 'refs/heads/main'
         shell: bash
-        run: python3 scripts/test_gui_layer1_contract.py
+        run: |
+          python3 scripts/test_gui_layer1_contract.py
+          python3 scripts/test_portable_shared_paths_contract.py
 
       - name: Descargar fuentes originales y verificar SHA256
         shell: bash
@@ -165,23 +167,38 @@ jobs:
           @'
           NUEVO EMULE PORTABLE - WINDOWS x64 (PRUEBA EXPERIMENTAL)
 
-          1. Extrae todo el ZIP en una carpeta propia y con permiso de escritura
-             (por ejemplo: Documentos\NuevoEmulePortable).
-          2. Con el eMule habitual ABIERTO, ejecuta nuevo-emule.exe de esta carpeta.
-          3. Deben verse DOS procesos distintos y la nueva ventana indicara PORTABLE.
-          4. Datos y descargas de esta prueba:
-                data\config\
-                data\Temp\
-                data\Incoming\
+          MODO AISLADO (PREDETERMINADO)
+          1. Extrae el ZIP en una carpeta distinta, con permiso de escritura.
+          2. Ejecuta nuevo-emule.exe. Sus rutas por defecto estan en:
+               data\config\
+               data\Temp\
+               data\Incoming\
+          3. El portable utiliza su propia configuracion y no modifica las
+             asociaciones ED2K ni el inicio automatico del eMule instalado.
 
-          No copies aqui el config, Temp ni los .part/.part.met de tu eMule
-          instalado. No modifiques el Incoming ni Temp del programa original.
-          Esta compilacion es experimental y aun requiere pruebas funcionales
-          de seleccion masiva, transferencia y recuperacion de datos.
-          La aplicacion portable no instala nada, no modifica las asociaciones
-          ED2K, ni altera el inicio automatico de la instalacion original.
+          REUTILIZAR TU COLA Y RUTAS SIN DUPLICAR Temp:
+          1. CIERRA COMPLETAMENTE el eMule instalado, incluido su proceso.
+          2. Copia SOLO preferences.ini y Category.ini desde la carpeta config
+             de tu eMule instalado hasta data\config\ de este portable.
+             NO copies la carpeta Temp ni Incoming. Tampoco muevas .part.
+          3. Conecta la unidad USB donde estan las carpetas originales.
+          4. Ejecuta SOLO nuevo-emule.exe. Comprueba en Opciones > Carpetas
+             que Temp e Incoming siguen apuntando a las rutas originales.
+          5. Al cerrar normalmente, las preferencias se guardan en
+             data\config\preferences.ini. El progreso de descarga se
+             guarda en los archivos .part y .part.met ORIGINALES.
+          6. Cierra el portable ANTES de volver a abrir el eMule instalado.
+
+          ADVERTENCIA: nunca ejecutes ambos programas a la vez apuntando
+          a las mismas carpetas Temp. El portable intenta impedirlo, pero
+          los parametros para ignorar instancias pueden saltarse la proteccion.
+          Para la primera prueba con 10.000+ descargas, deja la red
+          desconectada y evalua la interfaz; respalda si es posible los
+          .part.met y .part.met.bak antes de descargar con la version nueva.
+          Esta compilacion es experimental y no ha sido validada con la
+          cola real del usuario.
           '@ | Set-Content -LiteralPath (Join-Path $dir 'LEEME.txt') -Encoding utf8
-          'Fichero de control de carpeta portable: no copiar configuracion del eMule instalado.' |
+          'Modo aislado por defecto. Para reutilizar rutas instaladas, consultar LEEME.txt; nunca compartir Temp simultaneamente.' |
             Set-Content -LiteralPath (Join-Path $dir 'data/LEEME-DATOS.txt') -Encoding utf8
           if (-not (Test-Path (Join-Path $dir 'nuevo-emule.exe'))) { throw 'Falta el ejecutable portable' }
           if (-not (Test-Path (Join-Path $dir 'data/Temp'))) { throw 'Falta carpeta Temp aislada' }
