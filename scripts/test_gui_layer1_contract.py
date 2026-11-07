@@ -60,6 +60,18 @@ class DownloadListLayer1Contract(unittest.TestCase):
         self.assertIn("CPartFile *partfile = static_cast<CPartFile*>", fn)
         self.assertIn("bool\tCheckShowItemInGivenCat(INT_PTR inCategory) /*const*/;", PARTFILE)
 
+    def test_source_removal_is_batched_and_safe(self):
+        fn = body("void CDownloadListCtrl::RemoveSource(", "bool CDownloadListCtrl::RemoveFile(")
+        self.assertIn("std::unordered_set", fn)
+        self.assertIn("owner == NULL || owner == item->owner", fn)
+        self.assertIn("m_ListItems.lower_bound(source)", fn)
+        self.assertIn("for (int i = GetItemCount(); --i >= 0;)", fn)
+        self.assertNotIn("FindItem(", fn)
+        self.assertLess(fn.index("it = m_ListItems.erase(it)"), fn.index("DeleteItem(i)"))
+        self.assertLess(fn.index("DeleteItem(i)"), fn.index("delete *it"))
+        self.assertIn("SetRedraw(false);", fn)
+        self.assertIn("SetRedraw(true);", fn)
+
     def test_removal_unlinks_then_removes_rows_then_frees_memory(self):
         fn = body("bool CDownloadListCtrl::RemoveFile(", "void CDownloadListCtrl::UpdateItem(")
         self.assertIn("std::unordered_set", fn)
