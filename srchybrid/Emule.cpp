@@ -269,6 +269,23 @@ static void CALLBACK myLogHandler(LPCSTR lpMsg)
 static const UINT UWM_ARE_YOU_EMULE = RegisterWindowMessage(
 	CPreferences::IsPortableMode() ? _T("{eMule-nuevo-portable-instance-2026}") : EMULE_GUID);
 
+// When intentionally sharing installed folders, reserve the original
+// client's instance mutex as well as the separate portable mutex.
+static HANDLE s_hOriginalEmuleGuard = NULL;
+static const UINT UWM_ARE_YOU_INSTALLED_EMULE = RegisterWindowMessage(EMULE_GUID);
+
+static BOOL CALLBACK FindInstalledEmuleWindow(HWND hWnd, LPARAM lParam) noexcept
+{
+	DWORD_PTR result = 0;
+	if (::SendMessageTimeout(hWnd, UWM_ARE_YOU_INSTALLED_EMULE, 0, 0,
+		SMTO_BLOCK | SMTO_ABORTIFHUNG, 150, &result) != 0
+		&& result == UWM_ARE_YOU_INSTALLED_EMULE) {
+		*reinterpret_cast<HWND*>(lParam) = hWnd;
+		return FALSE;
+	}
+	return TRUE;
+}
+
 BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) noexcept;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -505,6 +522,40 @@ BOOL CemuleApp::InitInstance()
 
 	// create & initialize all the important stuff
 	thePrefs.Init();
+
+	if (CPreferences::IsPortableMode()) {
+		// Default portable paths remain isolated. If the user selects the
+		// installed Temp / Incoming, protect those shared files at startup.
+		bool sharedPaths = !EqualPaths(thePrefs.GetMuleDirectory(EMULE_INCOMINGDIR),
+			thePrefs.GetDefaultDirectory(EMULE_INCOMINGDIR, false));
+		const CString defaultTempDir = thePrefs.GetDefaultDirectory(EMULE_TEMPDIR, false);
+		for (INT_PTR i = 0; i < thePrefs.GetTempDirCount(); ++i)
+			if (!EqualPaths(thePrefs.GetTempDir(i), defaultTempDir))
+				sharedPaths = true;
+
+		if (sharedPaths) {
+			HWND installedWindow = NULL;
+			::EnumWindows(FindInstalledEmuleWindow, reinterpret_cast<LPARAM>(&installedWindow));
+			if (installedWindow != NULL) {
+				AfxMessageBox(_T("Cierra el eMule instalado antes de abrir nuevo-emule con carpetas compartidas. No utilices los mismos archivos .part en dos procesos."), MB_ICONERROR);
+				return FALSE;
+			}
+
+			CString originalMutexName;
+			const UINT originalPort = theApp.GetProfileInt(_T("eMule"), _T("Port"), DEFAULT_TCP_PORT_OLD);
+			originalMutexName.Format(_T("%s:%u"), EMULE_GUID, originalPort);
+			s_hOriginalEmuleGuard = ::CreateMutex(NULL, FALSE, originalMutexName);
+			const DWORD mutexError = ::GetLastError();
+			if (s_hOriginalEmuleGuard == NULL || mutexError == ERROR_ALREADY_EXISTS || mutexError == ERROR_ACCESS_DENIED) {
+				if (s_hOriginalEmuleGuard != NULL) {
+					::CloseHandle(s_hOriginalEmuleGuard);
+					s_hOriginalEmuleGuard = NULL;
+				}
+				AfxMessageBox(_T("No se puede reservar el bloqueo del eMule instalado. Comprueba que esta completamente cerrado antes de reutilizar sus carpetas."), MB_ICONERROR);
+				return FALSE;
+			}
+		}
+	}
 	theStats.Init();
 
 	// check if we have to restart eMule as Secure user
@@ -632,6 +683,10 @@ BOOL CemuleApp::InitInstance()
 	if (!CPreferences::IsPortableMode() && thePrefs.AutoTakeED2KLinks())
 		RevertReg();
 
+	if (s_hOriginalEmuleGuard != NULL) {
+		::CloseHandle(s_hOriginalEmuleGuard);
+		s_hOriginalEmuleGuard = NULL;
+	}
 	::CloseHandle(m_hMutexOneInstance);
 #ifdef _DEBUG
 	if (g_pfnPrevCrtAllocHook)
