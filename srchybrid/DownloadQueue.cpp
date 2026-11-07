@@ -396,6 +396,9 @@ void CDownloadQueue::Process()
 	// source purge and deferred deletion), not ten StopPausedFile calls/sec.
 	// Keep per-tick global statistics unchanged for existing GUI consumers.
 	const bool maintainInactiveFiles = m_udcounter >= 10;
+	// A single wall-clock sample is sufficient for all inactive files in this
+	// one-second maintenance pass; avoid thousands of time(NULL) calls.
+	const time_t inactiveMaintenanceTime = maintainInactiveFiles ? time(NULL) : 0;
 	for (POSITION pos = filelist.GetHeadPosition(); pos != NULL;) {
 		CPartFile *cur_file = filelist.GetNext(pos);
 		const EPartFileStatus fileStatus = cur_file->GetStatus();
@@ -412,7 +415,7 @@ void CDownloadQueue::Process()
 		if (inSet(fileStatus, PS_READY, PS_EMPTY))
 			datarateX += cur_file->Process(factor, m_udcounter);
 		else if (maintainInactiveFiles)
-			cur_file->StopPausedFile();
+			cur_file->StopPausedFile(inactiveMaintenanceTime);
 	}
 
 	average_dr_hist.AddTail(TransferredData{datarateX, curTick});
