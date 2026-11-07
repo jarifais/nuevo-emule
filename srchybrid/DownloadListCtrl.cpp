@@ -95,6 +95,7 @@ CDownloadListCtrl::~CDownloadListCtrl()
 	if (m_FileMenu)
 		VERIFY(m_FileMenu.DestroyMenu());
 
+	m_SourcesByOwner.clear(); // non-owning index: release references first
 	while (!m_ListItems.empty()) {
 		delete m_ListItems.begin()->second; // second = CtrlItem_Struct*
 		m_ListItems.erase(m_ListItems.begin());
@@ -231,7 +232,7 @@ void CDownloadListCtrl::Localize()
 	ShowFilesCount();
 }
 
-void CDownloadListCtrl::AddFile(CPartFile *toadd)
+void CDownloadListCtrl::AddFile(CPartFile *toadd, bool bNotifyCount)
 {
 	// Create new Item
 	CtrlItem_Struct *newitem = new CtrlItem_Struct;
@@ -251,8 +252,15 @@ void CDownloadListCtrl::AddFile(CPartFile *toadd)
 		if (InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)newitem) >= 0)
 			++m_nVisibleFileCount;
 	}
-	// AddFile is called once per recovered download. Avoid rescanning the entire
-	// queue on each insertion (quadratic work at 10,000+ downloads).
+	// During startup the queue loads thousands of files. Defer the window
+	// caption update until the recovered batch has been inserted; interactive
+	// AddFile calls still update the count immediately.
+	if (bNotifyCount)
+		ReportVisibleFileCount();
+}
+
+void CDownloadListCtrl::ReportVisibleFileCount()
+{
 	theApp.emuledlg->transferwnd->UpdateFilesCount(m_nVisibleFileCount);
 }
 
@@ -295,6 +303,7 @@ void CDownloadListCtrl::AddSource(CPartFile *owner, CUpDownClient *source, bool 
 	newitem->type = itemtype;
 
 	m_ListItems.emplace(source, newitem);
+	m_SourcesByOwner.emplace(owner, newitem);
 
 	if (owner->srcarevisible) {
 		// find parent from the CListCtrl to add source
@@ -321,6 +330,16 @@ void CDownloadListCtrl::RemoveSource(CUpDownClient *source, CPartFile *owner)
 		it != m_ListItems.end() && it->first == source;) {
 		const CtrlItem_Struct *item = it->second;
 		if (owner == NULL || owner == item->owner) {
+			// Unlink the second index before the item can be destroyed.
+			std::pair<SourcesByOwner::iterator, SourcesByOwner::iterator> sources = m_SourcesByOwner.equal_range(item->owner);
+			bool unlinked = false;
+			for (SourcesByOwner::iterator ownerIt = sources.first; ownerIt != sources.second; ++ownerIt)
+				if (ownerIt->second == item) {
+					m_SourcesByOwner.erase(ownerIt);
+					unlinked = true;
+					break;
+				}
+			ASSERT(unlinked);
 			removeItems.insert(item);
 			it = m_ListItems.erase(it);
 		} else
@@ -365,6 +384,10 @@ bool CDownloadListCtrl::RemoveFile(const CPartFile *toremove)
 	}
 	if (removeItems.empty())
 		return false;
+
+	// Every indexed source for this file has just been unlinked from
+	// m_ListItems; erase the parallel, non-owning owner index as well.
+	m_SourcesByOwner.erase(const_cast<CPartFile*>(toremove));
 
 	// One pass through visible rows replaces FindItem's full search for every
 	// linked source. Delete backwards so earlier indexes remain stable.
@@ -880,15 +903,23 @@ void CDownloadListCtrl::ExpandCollapseItem(int iItem, int iAction, bool bCollaps
 		if (iAction > COLLAPSE_ONLY) {
 			SetRedraw(false);
 
-			// Go through the whole list to find out the sources for this file
-			// Remark: don't use GetSourceCount() => UNAVAILABLE_SOURCE
-			for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
+			// Iterate only sources for this file, including unavailable A4AF
+			// sources. With 10,000 downloads, the old traversal scanned the
+			// entire global client map each time a single branch was expanded.
+			bool insertionFailed = false;
+			std::pair<SourcesByOwner::iterator, SourcesByOwner::iterator> sources = m_SourcesByOwner.equal_range(partfile);
+			for (SourcesByOwner::iterator it = sources.first; it != sources.second; ++it) {
 				const CtrlItem_Struct *cur_item = it->second;
-				if (cur_item->owner == partfile) {
-					partfile->srcarevisible = true;
-					InsertItem(LVIF_TEXT | LVIF_PARAM, iItem + 1, LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)cur_item);
+				if (InsertItem(LVIF_TEXT | LVIF_PARAM, iItem + 1, LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)cur_item) < 0) {
+					insertionFailed = true;
+					break;
 				}
+				partfile->srcarevisible = true;
 			}
+			// Never report an expanded branch with only a subset of its rows
+			// after the Windows list view rejects an insertion.
+			if (insertionFailed && partfile->srcarevisible)
+				HideSources(partfile);
 
 			SetRedraw(true);
 		}
