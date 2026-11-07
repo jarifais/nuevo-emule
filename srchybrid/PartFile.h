@@ -251,7 +251,8 @@ public:
 	void	DeletePartFile();
 	void	StopFile(bool bCancel = false, bool resort = true);
 	void	PauseFile(bool bInsufficient = false, bool resort = true);
-	void	StopPausedFile();
+	// Optional shared timestamp avoids redundant clock calls in the queue sweep.
+	void	StopPausedFile(time_t currentTime = 0);
 	void	ResumeFile(bool resort = true);
 	void	ResumeFileInsufficient();
 	void	SetPauseOnPreview(bool bVal)				{ m_bPauseOnPreview = bVal; }
