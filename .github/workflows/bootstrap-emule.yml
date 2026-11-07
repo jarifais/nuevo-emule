@@ -38,6 +38,7 @@ jobs:
           python3 scripts/test_gui_layer1_contract.py
           python3 scripts/test_portable_shared_paths_contract.py
           python3 scripts/test_scheduler_layer2_contract.py
+          python3 scripts/test_io_layer3_contract.py
 
       - name: Descargar fuentes originales y verificar SHA256
         shell: bash
