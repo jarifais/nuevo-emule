@@ -11,9 +11,11 @@ Poder ejecutar **nuevo-emule.exe** simultáneamente con el eMule instalado, sin 
 - `Emule.cpp` y `EmuleDlg.cpp` registran mensajes de identificación de ventana distintos para cada variante. Así, al comprobar instancias ya abiertas, no se activa por error la ventana del otro programa.
 - Título visible: «nuevo-emule PORTABLE» (también cuando se muestran tasas de transferencia).
 - `CPreferences::GetDefaultDirectory` no consulta el perfil de eMule instalado, ni su preferencia de directorios en el registro. Usa `data/` dentro de la carpeta descomprimida.
-- En modo portable se fuerzan `data/Temp` y `data/Incoming` al cargar las preferencias, sin reutilizar rutas escritas en un archivo INI.
+- En modo portable, `data/Temp` y `data/Incoming` son los valores predeterminados, pero **se respetan** `TempDir`, `TempDirs` e `IncomingDir` de `data/config/preferences.ini`. Así se pueden reutilizar carpetas existentes sin duplicar los archivos, de manera explícita. Las preferencias siguen siendo independientes del eMule instalado.
 - Se desactiva la toma automática de asociaciones ED2K, el cambio de inicio automático y la alteración automática de reglas del firewall de eMule.
-- Se mantienen los puertos de red elegidos de forma independiente mediante las preferencias propias (la asignación inicial suele ser aleatoria); en caso de conflicto es necesario cambiarlos.
+- Se mantienen los puertos de red elegidos mediante las preferencias propias. Si se copia `preferences.ini` del instalado, los puertos también serán los de ese archivo; nunca ejecutar ambos clientes a la vez utilizando las mismas carpetas temporales.
+- Si se utilizan carpetas externas, el portable comprueba al arrancar que las rutas configuradas existan y sean directorios; si falta un disco USB, se detiene antes de cargar la cola, evitando sustituir silenciosamente las rutas.
+- Si se utilizan carpetas externas, el portable busca la ventana original y reserva el mutex de instancia del eMule instalado para su puerto configurado. Esta protección es preventiva, **no autoriza** a iniciar el original con `-ignoreinstances` ni a utilizar perfiles compartidos en paralelo.
 
 ## Estructura del ZIP
 
@@ -41,6 +43,18 @@ El ZIP se publica como prerelease de GitHub, **únicamente cuando su workflow Wi
 8. Comprobar conectividad si se desean descargas concurrentes; asegurarse de que los puertos TCP/UDP no coinciden.
 
 **Precaución:** no apuntar las dos instancias a los mismos `.part`/`.part.met` ni copiar a la variante experimental la cola en producción de más de 10.000 descargas. Hacer pruebas primero con archivos de prueba. No hay pruebas funcionales realizadas sobre un equipo Windows con eMule instalado de forma simultánea.
+
+
+## Reutilizar rutas del eMule instalado sin duplicar Temp (modo voluntario)
+
+1. **Cerrar por completo el eMule instalado** y comprobar que no queda su proceso en el Administrador de tareas. No abrir dos programas sobre los mismos `.part`/`.part.met`.
+2. Extraer el nuevo ZIP en un directorio distinto y vacío. **No copiar** la carpeta `Temp` ni `Incoming`.
+3. Antes del primer inicio del portable, copiar **solo los archivos pequeños** `preferences.ini` y `Category.ini` desde la carpeta `config` original hacia `data/config` del portable, sin borrar los originales. Los directorios guardados en `preferences.ini` deben existir y ser accesibles. `Category.ini` conserva los filtros y categorías (incluidas rutas de finalización); revisar las rutas externas antes de descargar. El directorio `config` original puede estar bajo la instalación, el perfil de usuario o datos públicos, según cómo esté instalado eMule.
+4. Iniciar **solo** `nuevo-emule.exe`. En Opciones > Carpetas, comprobar que las rutas `Temp` e `Incoming` corresponden a las del eMule instalado. La cola se carga desde los `.part.met` originales, sin mover/copiar `Temp`.
+5. Cerrar normalmente el portable antes de abrir el original. El portable guarda sus preferencias en **su propio** `data/config/preferences.ini` al cerrar; los cambios de progreso de descargas se escriben en los `.part`/`.part.met` **originales**. Al volver a abrir el portable se mantienen las rutas elegidas.
+6. Si solo interesa la interfaz con >10.000 descargas, desconectar la red durante la primera prueba; medir selección Mayús+flecha, cambio de categoría y memoria sin efectuar transferencias. Si hace falta probar descargas reales, conviene respaldar antes al menos los ficheros de metadatos `.part.met` y `.part.met.bak`, que normalmente ocupan mucho menos espacio que toda la carpeta `Temp`.
+
+**Limitaciones:** es una compilación experimental. La comprobación de instancias minimiza el riesgo pero no garantiza exclusividad absoluta si se usan parámetros para ignorar instancias, otros clientes, puertos diferentes o sesiones distintas. Nunca ejecutar en paralelo sobre una misma carpeta `Temp`. Si un destino original desaparece o deja de estar disponible, restaurarlo antes del inicio en vez de aceptar una carpeta alternativa.
 
 ## Pendiente
 
