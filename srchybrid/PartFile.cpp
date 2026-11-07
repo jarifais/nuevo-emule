@@ -3268,10 +3268,14 @@ void CPartFile::StopFile(bool bCancel, bool resort)
 	UpdateDisplayedInfo(true);
 }
 
-void CPartFile::StopPausedFile()
+void CPartFile::StopPausedFile(time_t currentTime)
 {
-	//Once an hour, remove any sources for files which are no longer active downloads
-	if (inSet(GetStatus(), PS_PAUSED, PS_INSUFFICIENT, PS_ERROR) && !m_stopped && time(NULL) >= m_iLastPausePurge + HR2S(1))
+	// Once an hour, remove sources for files which are no longer active.
+	// The queue supplies one timestamp per sweep; callers outside the queue
+	// can still omit it and use the local clock, retaining the old behavior.
+	if (currentTime == 0)
+		currentTime = time(NULL);
+	if (inSet(GetStatus(), PS_PAUSED, PS_INSUFFICIENT, PS_ERROR) && !m_stopped && currentTime >= m_iLastPausePurge + HR2S(1))
 		StopFile();
 	else if (m_bDelayDelete)
 		DeletePartFile();
