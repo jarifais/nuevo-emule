@@ -552,8 +552,8 @@ BOOL CemuleApp::InitInstance()
 		// Default portable paths remain isolated. If the user selects the
 		// installed Temp / Incoming, protect those shared files at startup.
 		bool sharedPaths = !EqualPaths(thePrefs.GetMuleDirectory(EMULE_INCOMINGDIR),
-			thePrefs.GetDefaultDirectory(EMULE_INCOMINGDIR, false));
-		const CString defaultTempDir = thePrefs.GetDefaultDirectory(EMULE_TEMPDIR, false);
+			thePrefs.GetPortableDefaultDirectory(EMULE_INCOMINGDIR));
+		const CString defaultTempDir = thePrefs.GetPortableDefaultDirectory(EMULE_TEMPDIR);
 		for (INT_PTR i = 0; i < thePrefs.GetTempDirCount(); ++i)
 			if (!EqualPaths(thePrefs.GetTempDir(i), defaultTempDir))
 				sharedPaths = true;
