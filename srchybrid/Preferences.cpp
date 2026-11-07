@@ -1898,17 +1898,20 @@ void CPreferences::LoadPreferences()
 	if (strNick.IsEmpty() || IsDefaultNick(strNick))
 		SetUserNick(DEFAULT_NICK);
 
-	m_strIncomingDir = IsPortableMode() ? GetDefaultDirectory(EMULE_INCOMINGDIR, true) : ini.GetString(_T("IncomingDir"), _T(""));
+	// Portable preferences live in data/config, independent from the installed client.
+	// Honor explicitly saved download directories so large .part queues do not
+	// need to be copied; the default remains the isolated portable data folder.
+	m_strIncomingDir = ini.GetString(_T("IncomingDir"), _T(""));
 	if (m_strIncomingDir.IsEmpty()) // We want GetDefaultDirectory to also create the folder, so we have to know if we use the default or not
 		m_strIncomingDir = GetDefaultDirectory(EMULE_INCOMINGDIR, true);
 	MakeFoldername(m_strIncomingDir);
 
 	// load tempdir(s) setting
-	CString sTempdirs(IsPortableMode() ? GetDefaultDirectory(EMULE_TEMPDIR, true) : ini.GetString(_T("TempDir"), _T("")));
+	CString sTempdirs(ini.GetString(_T("TempDir"), _T("")));
 	if (sTempdirs.IsEmpty()) // We want GetDefaultDirectory to also create the folder, so we have to know if we use the default or not
 		sTempdirs = GetDefaultDirectory(EMULE_TEMPDIR, true);
-	if (!IsPortableMode())
-		sTempdirs.AppendFormat(_T("|%s"), (LPCTSTR)ini.GetString(_T("TempDirs")));
+	// Preserve multiple configured Temp directories across portable restarts too.
+	sTempdirs.AppendFormat(_T("|%s"), (LPCTSTR)ini.GetString(_T("TempDirs")));
 
 	for (int iPos = 0; iPos >= 0;) {
 		CString sTmp(sTempdirs.Tokenize(_T("|"), iPos));
