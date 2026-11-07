@@ -1714,35 +1714,73 @@ void CDownloadListCtrl::ClearCompleted(int incat)
 	if (incat == -2)
 		incat = m_curTab;
 
-	// Search for completed file(s)
-	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end();) {
-		const CtrlItem_Struct *cur_item = it->second;
-		++it; // Already point to the next iterator.
-		if (cur_item->type == FILE_TYPE) {
-			CPartFile *file = static_cast<CPartFile*>(cur_item->value);
-			if (!file->IsPartFile() && (file->CheckShowItemInGivenCat(incat) || incat == -1))
-				if (RemoveFile(file))
-					it = m_ListItems.begin();
+	// Remove all completed files in one batch. Restarting m_ListItems from
+	// begin() after each deletion used to rescan the entire map for every
+	// completed file; RemoveFile also scanned the visible list every time.
+	std::unordered_set<const CPartFile*> completed;
+	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
+		const CtrlItem_Struct *item = it->second;
+		if (item->type == FILE_TYPE) {
+			CPartFile *file = static_cast<CPartFile*>(item->value);
+			if (!file->IsPartFile() && (incat == -1 || file->CheckShowItemInGivenCat(incat)))
+				completed.insert(file);
 		}
 	}
+
+	if (!completed.empty()) {
+		std::unordered_set<const CtrlItem_Struct*> removeItems;
+		for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end();) {
+			const CtrlItem_Struct *item = it->second;
+			const CPartFile *owner = item->type == FILE_TYPE
+				? static_cast<CPartFile*>(item->value) : item->owner;
+			if (owner != NULL && completed.find(owner) != completed.end()) {
+				removeItems.insert(item);
+				it = m_ListItems.erase(it);
+			} else
+				++it;
+		}
+
+		for (std::unordered_set<const CPartFile*>::const_iterator it = completed.begin();
+			it != completed.end(); ++it)
+			m_SourcesByOwner.erase(const_cast<CPartFile*>(*it));
+
+		// Remove rows first, then free the source and file objects; Windows
+		// must never retain a list-view lParam to an already freed object.
+		SetRedraw(false);
+		int removedVisibleFiles = 0;
+		for (int i = GetItemCount(); --i >= 0;) {
+			const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(GetItemData(i));
+			if (item != NULL && removeItems.find(item) != removeItems.end()) {
+				const bool isFile = item->type == FILE_TYPE;
+				if (DeleteItem(i) && isFile)
+					++removedVisibleFiles;
+			}
+		}
+		SetRedraw(true);
+
+		for (std::unordered_set<const CtrlItem_Struct*>::const_iterator it = removeItems.begin();
+			it != removeItems.end(); ++it)
+			delete *it;
+
+		ASSERT(removedVisibleFiles <= m_nVisibleFileCount);
+		m_nVisibleFileCount = removedVisibleFiles <= m_nVisibleFileCount
+			? m_nVisibleFileCount - removedVisibleFiles : 0;
+		ReportVisibleFileCount();
+	}
+
 	if (thePrefs.ShowCatTabInfos())
 		theApp.emuledlg->transferwnd->UpdateCatTabTitles();
 }
 
 void CDownloadListCtrl::ClearCompleted(const CPartFile *pFile)
 {
-	if (pFile->IsPartFile())
+	if (pFile == NULL || pFile->IsPartFile())
 		return;
-	for (ListItems::const_iterator it = m_ListItems.begin(); it != m_ListItems.end(); ++it) {
-		const CtrlItem_Struct *cur_item = it->second;
-		if (cur_item->type == FILE_TYPE) {
-			const CPartFile *pCurFile = static_cast<CPartFile*>(cur_item->value);
-			if (pCurFile == pFile) {
-				RemoveFile(pCurFile);
-				return;
-			}
-		}
-	}
+
+	// The file itself is indexed under its CPartFile pointer.
+	ListItems::const_iterator it = m_ListItems.find(const_cast<CPartFile*>(pFile));
+	if (it != m_ListItems.end() && it->second->type == FILE_TYPE && it->second->value == pFile)
+		RemoveFile(pFile);
 }
 
 void CDownloadListCtrl::SetStyle()
