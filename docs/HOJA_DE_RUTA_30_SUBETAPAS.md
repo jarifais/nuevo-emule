@@ -11,8 +11,8 @@
 - [x] **1.1 Repintados innecesarios:** optimizar eventos de selección, actualización de filas visibles y recursos GDI. **Implementada; validar en Windows**.
 - [x] **1.2 Categorías y búsquedas de filas:** evitar búsquedas repetitivas y conservar recuentos de filas. **Implementada; validar en Windows**.
 - [x] **1.3 Inserción/eliminación de fuentes A4AF:** barrido seguro sin filas huérfanas ni punteros liberados prematuramente. **Implementada; validar en Windows**.
-- [ ] **1.4 Selección masiva y navegación:** completar manejo de Mayús+flecha, Ctrl+clic, enfoque, teclado y desplazamiento; diagnosticar trabajo O(N) redundante. **Parcial**.
-- [ ] **1.5 Diagnóstico y regresión con 10.000+:** medir bloqueos, excepciones, latencias, RAM, CPU, recuentos, fuentes expandidas, pestañas, reanudación y cierre. **Pendiente de ejecución real**.
+- [x] **1.4 Selección masiva y navegación:** eventos de selección sin repintado de filas vecinas, agrupación cada 200 ms del cálculo de comandos, comprobación del árbol de fuentes y lectura de datos de fila sin búsquedas lineales en Release. **Implementada en código, pendiente de validar Mayús+flecha y navegación en Windows con 10.000+ descargas**.
+- [ ] **1.5 Diagnóstico y regresión con 10.000+:** medir bloqueos, excepciones, latencias, RAM, CPU, recuentos, fuentes expandidas, pestañas, reanudación y cierre. **Pendiente de ejecución real:** [issue #3](https://github.com/jarifais/nuevo-emule/issues/3), [matriz y script de pruebas](GUI_CAPA1_PRUEBAS_10000.md).
 
 ## Capa 2 — Motor de descargas y CPU
 
@@ -66,6 +66,9 @@
 ## Referencias
 
 - [Detalle original y aceptación de la capa 1](PLAN_MEJORAS_POR_CAPAS_2026-11-06.md).
+- [Capa 1: matriz de pruebas 10.000+ y medidas de CPU/RAM](GUI_CAPA1_PRUEBAS_10000.md).
+- [Seguimiento en GitHub: hoja de ruta #2](https://github.com/jarifais/nuevo-emule/issues/2).
+- [Último ZIP portable compilado con los cambios de la capa 1](https://github.com/jarifais/nuevo-emule/releases/tag/portable-test-79f1a89d2d95).
 - [Capa 2.1 — planificador](CAPA2_PLANIFICADOR_2026-11-07.md).
 - [Capa 3.1 — disco](CAPA3_DISCO_2026-11-07.md).
 - [Portable con carpetas compartidas](PORTABLE_INDEPENDIENTE_2026-11-06.md).
