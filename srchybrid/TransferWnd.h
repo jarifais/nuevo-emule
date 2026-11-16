@@ -102,6 +102,17 @@ protected:
 	bool		m_bIsDragging;
 	bool		downloadlistactive;
 	bool		m_bLayoutInited;
+	CEdit m_downloadFilterEdit;
+	CButton m_downloadFilterWhole;
+	CButton m_downloadFilterSelect;
+	CButton m_downloadFilterClear;
+	CStatic m_downloadFilterCount;
+	CRect m_downloadFilterLayout{0, 0, 0, 0};
+	void CreateDownloadFilterBar();
+	void ShowDownloadFilterBar(bool show);
+	void LayoutDownloadFilterBar();
+	void LocalizeDownloadFilterBar();
+	void ApplyDownloadFilterBar();
 
 	void	ShowWnd2(EWnd2 uWnd2);
 	void	SetWnd2(EWnd2 uWnd2);
