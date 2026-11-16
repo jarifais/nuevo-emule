@@ -2379,6 +2379,11 @@
 #define IDC_CONNECTEDTXT                3045
 #define IDC_COMPLTXT                    3046
 #define IDC_SPACETXT                    3047
+#define IDC_DL_FILTER_EDIT              3048
+#define IDC_DL_FILTER_WHOLE             3049
+#define IDC_DL_FILTER_SELECT            3050
+#define IDC_DL_FILTER_CLEAR             3051
+#define IDC_DL_FILTER_COUNT             3052
 #define IDA_ENTER                       32771
 
 // Next default values for new objects
@@ -2387,7 +2392,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        1568
 #define _APS_NEXT_COMMAND_VALUE         32773
-#define _APS_NEXT_CONTROL_VALUE         3048
+#define _APS_NEXT_CONTROL_VALUE         3053
 #define _APS_NEXT_SYMED_VALUE           1610
 #endif
 #endif

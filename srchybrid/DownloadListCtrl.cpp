@@ -38,6 +38,12 @@
 #include "SearchDlg.h"
 #include "SharedFileList.h"
 #include "ImportParts.h"
+#include "OtherFunctions.h"
+#include <afxdlgs.h>
+#include <shlwapi.h>
+#include <array>
+#include <vector>
+#include <unordered_set>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -243,7 +249,7 @@ void CDownloadListCtrl::AddFile(CPartFile *toadd)
 	ASSERT(m_ListItems.find(toadd) == m_ListItems.end());
 	m_ListItems.emplace(toadd, newitem);
 
-	if (toadd->CheckShowItemInGivenCat(m_curTab))
+	if (toadd->CheckShowItemInGivenCat(m_curTab) && MatchesDownloadFilter(toadd))
 		InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)newitem);
 
 	ShowFilesCount();
@@ -373,6 +379,20 @@ void CDownloadListCtrl::UpdateItem(void *toupdate)
 		find.flags = LVFI_PARAM;
 		find.lParam = (LPARAM)updateItem;
 		int iItem = FindItem(&find);
+		if (HasDownloadFilter() && updateItem->type == FILE_TYPE) {
+			CPartFile *file = static_cast<CPartFile*>(updateItem->value);
+			const bool visible = MatchesDownloadFilter(file) && (iItem >= 0 || file->CheckShowItemInGivenCat(m_curTab));
+			// Category/status changes arrive through UpdateCurrentCategoryView; avoid
+			// reevaluating the category predicate for visible periodic speed updates.
+			if (visible != (iItem >= 0)) {
+				if (visible)
+					ShowFile(it);
+				else
+					HideFile(it);
+				ShowFilesCount();
+				continue;
+			}
+		}
 		if (iItem >= 0) {
 			updateItem->dwUpdated = 0;
 			if (Update(iItem)
@@ -946,6 +966,7 @@ void CDownloadListCtrl::OnContextMenu(CWnd*, CPoint point)
 			// enable commands if there is at least one item which can be used for the action
 			m_FileMenu.EnableMenuItem(MP_CANCEL, iFilesToCancel > 0 ? MF_ENABLED : MF_GRAYED);
 			m_FileMenu.EnableMenuItem(MP_STOP, iFilesToStop > 0 ? MF_ENABLED : MF_GRAYED);
+			m_FileMenu.EnableMenuItem(MP_DOWNLOAD_TO_FOLDER, iFilesNotDone > 0 ? MF_ENABLED : MF_GRAYED);
 			m_FileMenu.EnableMenuItem(MP_PAUSE, iFilesToPause > 0 ? MF_ENABLED : MF_GRAYED);
 			m_FileMenu.EnableMenuItem(MP_RESUME, iFilesToResume > 0 ? MF_ENABLED : MF_GRAYED);
 
@@ -1093,6 +1114,7 @@ void CDownloadListCtrl::OnContextMenu(CWnd*, CPoint point)
 		} else
 			m_FileMenu.EnableMenuItem(MP_PREVIEW, MF_GRAYED);
 
+		m_FileMenu.EnableMenuItem(MP_DOWNLOAD_TO_FOLDER, MF_GRAYED);
 		m_FileMenu.EnableMenuItem(MP_METINFO, MF_GRAYED);
 		m_FileMenu.EnableMenuItem(MP_VIEWFILECOMMENTS, MF_GRAYED);
 		if (thePrefs.m_bImportParts)
@@ -1361,9 +1383,12 @@ BOOL CDownloadListCtrl::OnCommand(WPARAM wParam, LPARAM)
 				SetRedraw(true);
 				theApp.emuledlg->transferwnd->UpdateCatTabTitles();
 				break;
+			case MP_DOWNLOAD_TO_FOLDER:
+				ChangeSelectedDownloadDestination(selectedList);
+				break;
 			case MP_CLEARCOMPLETED:
 				SetRedraw(false);
-				ClearCompleted();
+				ClearVisibleCompleted();
 				SetRedraw(true);
 				break;
 			case MPG_F2:
@@ -1541,7 +1566,7 @@ BOOL CDownloadListCtrl::OnCommand(WPARAM wParam, LPARAM)
 			}
 		}
 	} else if (wParam == MP_CLEARCOMPLETED) //nothing selected
-		ClearCompleted();
+		ClearVisibleCompleted();
 
 	m_availableCommandsDirty = true;
 	return TRUE;
@@ -1895,6 +1920,8 @@ void CDownloadListCtrl::CreateMenus()
 	m_FileMenu.AppendMenu(MF_SEPARATOR);
 
 	m_FileMenu.AppendMenu(MF_STRING, MP_CLEARCOMPLETED, GetResString(IDS_DL_CLEAR), _T("CLEARCOMPLETE"));
+	m_FileMenu.AppendMenu(MF_STRING | MF_GRAYED, MP_DOWNLOAD_TO_FOLDER,
+		PRIMARYLANGID(thePrefs.GetLanguageID()) == LANG_SPANISH ? _T("Cambiar destino...") : _T("Change destination..."));
 
 	// Add (extended user mode) 'Source Handling' sub menu
 	//
@@ -2135,16 +2162,22 @@ void CDownloadListCtrl::UpdateCurrentCategoryView(CPartFile *thisfile)
 		const CtrlItem_Struct *cur_item = it->second;
 		if (cur_item->type == FILE_TYPE) {
 			CPartFile *file = static_cast<CPartFile*>(cur_item->value);
-			if (file->CheckShowItemInGivenCat(m_curTab))
+			if (file->CheckShowItemInGivenCat(m_curTab) && MatchesDownloadFilter(file))
 				ShowFile(it);
 			else
 				HideFile(it);
+			if (HasDownloadFilter())
+				ShowFilesCount();
 		}
 	}
 }
 
 void CDownloadListCtrl::ChangeCategory(int newsel)
 {
+	if (HasDownloadFilter()) {
+		ApplyDownloadFilter(newsel, m_curTab != static_cast<UINT>(newsel));
+		return;
+	}
 	SetRedraw(false);
 
 	// show the files of the selected category, remove all others
@@ -2160,6 +2193,229 @@ void CDownloadListCtrl::ChangeCategory(int newsel)
 	SetRedraw(true);
 	m_curTab = newsel;
 	ShowFilesCount();
+}
+
+void CDownloadListCtrl::SetDownloadFilter(const CString &query, bool wholeWords)
+{
+	CString normalized(query);
+	normalized.Trim();
+	normalized.MakeLower();
+	if (normalized == m_filterQuery && wholeWords == m_filterWholeWords)
+		return;
+
+	const bool wasActive = HasDownloadFilter();
+	m_filterQuery = normalized;
+	m_filterWholeWords = wholeWords;
+	m_filterWords.RemoveAll();
+	int position = 0;
+	while (position >= 0) {
+		CString term = normalized.Tokenize(_T(" \t\r\n"), position);
+		if (!term.IsEmpty())
+			m_filterWords.Add(term);
+	}
+	if (m_filterWords.IsEmpty())
+		m_filterQuery.Empty();
+	if (wasActive || HasDownloadFilter())
+		ApplyDownloadFilter(m_curTab, true);
+}
+
+bool CDownloadListCtrl::MatchesDownloadFilter(const CPartFile *file) const
+{
+	if (!HasDownloadFilter())
+		return true;
+
+	CString name(file->GetFileName());
+	name.MakeLower();
+	for (INT_PTR i = 0; i < m_filterWords.GetCount(); ++i) {
+		const CString &term = m_filterWords.GetAt(i);
+		int pos = name.Find(term);
+		if (m_filterWholeWords) {
+			while (pos >= 0) {
+				const int end = pos + term.GetLength();
+				if ((pos == 0 || !::IsCharAlphaNumeric(name[pos - 1]))
+					&& (end == name.GetLength() || !::IsCharAlphaNumeric(name[end])))
+					break;
+				pos = name.Find(term, pos + 1);
+			}
+		}
+		if (pos < 0)
+			return false;
+	}
+	return true;
+}
+
+void CDownloadListCtrl::ApplyDownloadFilter(int category, bool clearSelection)
+{
+	// Keep the download model intact. Only native view rows are changed.
+	std::unordered_set<const CtrlItem_Struct*> wanted;
+	for (const auto &entry : m_ListItems) {
+		const CtrlItem_Struct *item = entry.second;
+		if (item->type == FILE_TYPE) {
+			CPartFile *file = static_cast<CPartFile*>(item->value);
+			if (file->CheckShowItemInGivenCat(category) && MatchesDownloadFilter(file))
+				wanted.insert(item);
+		}
+	}
+	SetRedraw(false);
+	if (clearSelection) {
+		SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+		SetSelectionMark(-1);
+	}
+	std::unordered_set<const CtrlItem_Struct*> present;
+	for (int i = GetItemCount(); --i >= 0;) {
+		CtrlItem_Struct *item = reinterpret_cast<CtrlItem_Struct*>(CListCtrl::GetItemData(i));
+		if (item == NULL)
+			continue;
+		const bool isFile = item->type == FILE_TYPE;
+		if (wanted.count(isFile ? item : item->parent) == 0) {
+			if (isFile)
+				static_cast<CPartFile*>(item->value)->srcarevisible = false;
+			else {
+				item->dwUpdated = 0;
+				item->status.DeleteObject();
+			}
+			DeleteItem(i);
+		} else if (isFile)
+			present.insert(item);
+	}
+	for (const auto &entry : m_ListItems) {
+		CtrlItem_Struct *item = entry.second;
+		if (wanted.count(item) != 0 && present.count(item) == 0)
+			InsertItem(LVIF_TEXT | LVIF_PARAM, GetItemCount(), LPSTR_TEXTCALLBACK, 0, 0, 0, (LPARAM)item);
+	}
+	m_curTab = category;
+	SetRedraw(true);
+	Invalidate(FALSE);
+	m_availableCommandsDirty = true;
+	ShowFilesCount();
+}
+
+int CDownloadListCtrl::GetVisibleDownloadCount() const
+{
+	int count = 0;
+	for (int i = 0; i < GetItemCount(); ++i) {
+		const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(CListCtrl::GetItemData(i));
+		if (item != NULL && item->type == FILE_TYPE)
+			++count;
+	}
+	return count;
+}
+
+void CDownloadListCtrl::SelectVisibleDownloads()
+{
+	SetRedraw(false);
+	SetItemState(-1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+	int first = -1;
+	for (int i = 0; i < GetItemCount(); ++i) {
+		const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(CListCtrl::GetItemData(i));
+		if (item != NULL && item->type == FILE_TYPE) {
+			SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
+			if (first < 0)
+				first = i;
+		}
+	}
+	SetSelectionMark(first);
+	if (first >= 0) {
+		SetItemState(first, LVIS_FOCUSED, LVIS_FOCUSED);
+		EnsureVisible(first, FALSE);
+	}
+	SetRedraw(true);
+	Invalidate(FALSE);
+	SetFocus();
+	m_availableCommandsDirty = true;
+}
+
+void CDownloadListCtrl::ClearVisibleCompleted()
+{
+	if (!HasDownloadFilter()) {
+		ClearCompleted();
+		return;
+	}
+	std::vector<CPartFile*> completed;
+	for (int i = 0; i < GetItemCount(); ++i) {
+		const CtrlItem_Struct *item = reinterpret_cast<const CtrlItem_Struct*>(CListCtrl::GetItemData(i));
+		if (item != NULL && item->type == FILE_TYPE) {
+			CPartFile *file = static_cast<CPartFile*>(item->value);
+			if (!file->IsPartFile())
+				completed.push_back(file);
+		}
+	}
+	for (CPartFile *file : completed)
+		RemoveFile(file);
+	if (thePrefs.ShowCatTabInfos())
+		theApp.emuledlg->transferwnd->UpdateCatTabTitles();
+}
+
+void CDownloadListCtrl::ChangeSelectedDownloadDestination(CTypedPtrList<CPtrList, CPartFile*> &selectedList)
+{
+	// Snapshot hashes rather than retaining pointers across the modal picker.
+	std::vector<std::array<uchar, 16>> hashes;
+	for (POSITION pos = selectedList.GetHeadPosition(); pos != NULL;) {
+		const CPartFile *file = selectedList.GetNext(pos);
+		if (file->IsPartFile() && file->GetStatus() != PS_COMPLETING) {
+			std::array<uchar, 16> hash;
+			memcpy(hash.data(), file->GetFileHash(), hash.size());
+			hashes.push_back(hash);
+		}
+	}
+	if (hashes.empty())
+		return;
+	CFolderPickerDialog picker(thePrefs.GetMuleDirectory(EMULE_INCOMINGDIR),
+		OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR, this);
+	if (picker.DoModal() != IDOK || theApp.IsClosing())
+		return;
+
+	CString destination = picker.GetPathName();
+	if (destination.IsEmpty() || destination.GetLength() >= MAX_PATH - 1) {
+		AfxMessageBox(GetResString(IDS_ERR_BADFOLDER));
+		return;
+	}
+	MakeFoldername(destination);
+	if (!PathIsDirectory(destination) || !thePrefs.IsShareableDirectory(destination)) {
+		AfxMessageBox(GetResString(IDS_ERR_BADFOLDER));
+		return;
+	}
+	bool hasEligible = false;
+	for (const auto &hash : hashes) {
+		const CPartFile *file = theApp.downloadqueue->GetFileByID(hash.data());
+		if (file != NULL && file->IsPartFile() && file->GetStatus() != PS_COMPLETING) {
+			hasEligible = true;
+			break;
+		}
+	}
+	if (!hasEligible)
+		return;
+
+	int category = -1;
+	for (int i = 0; i < thePrefs.GetCatCount(); ++i) {
+		CString candidate = i == 0 ? thePrefs.GetMuleDirectory(EMULE_INCOMINGDIR) : thePrefs.GetCatPath(i);
+		MakeFoldername(candidate);
+		if (candidate.CompareNoCase(destination) == 0) {
+			category = i;
+			break;
+		}
+	}
+	if (category < 0) {
+		CString title(PRIMARYLANGID(thePrefs.GetLanguageID()) == LANG_SPANISH ? _T("Destino: ") : _T("Destination: "));
+		title += destination;
+		category = theApp.emuledlg->transferwnd->AddCategory(title, destination, _T(""), _T(""));
+		theApp.emuledlg->searchwnd->UpdateCatTabs();
+		thePrefs.SaveCats();
+	}
+	if (category < 0 || category >= thePrefs.GetCatCount())
+		return;
+
+	SetRedraw(false);
+	for (const auto &hash : hashes) {
+		CPartFile *file = theApp.downloadqueue->GetFileByID(hash.data());
+		if (file != NULL && file->IsPartFile() && file->GetStatus() != PS_COMPLETING) {
+			file->SetCategory(category);
+			file->UpdateDisplayedInfo(true);
+		}
+	}
+	SetRedraw(true);
+	UpdateCurrentCategoryView();
+	theApp.emuledlg->transferwnd->UpdateCatTabTitles();
 }
 
 void CDownloadListCtrl::HideFile(ListItems::const_iterator ihide)

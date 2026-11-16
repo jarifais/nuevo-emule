@@ -106,6 +106,10 @@ public:
 	void	Localize();
 	void	ShowFilesCount();
 	void	ChangeCategory(int newsel);
+	void SetDownloadFilter(const CString &query, bool wholeWords);
+	bool HasDownloadFilter() const { return !m_filterQuery.IsEmpty(); }
+	int GetVisibleDownloadCount() const;
+	void SelectVisibleDownloads();
 	CString getTextList();
 	void	ShowSelectedFileDetails();
 	void	ExpandCollapseItem(int iItem, int iAction, bool bCollapseSource = false);
@@ -136,6 +140,13 @@ protected:
 	DWORD		m_dwLastAvailableCommandsCheck;
 	bool		m_bRemainSort;
 	bool		m_availableCommandsDirty;
+	CString m_filterQuery;
+	CStringArray m_filterWords;
+	bool m_filterWholeWords = false;
+	bool MatchesDownloadFilter(const CPartFile *file) const;
+	void ApplyDownloadFilter(int category, bool clearSelection);
+	void ChangeSelectedDownloadDestination(CTypedPtrList<CPtrList, CPartFile*> &selectedList);
+	void ClearVisibleCompleted();
 
 	void HideFile(ListItems::const_iterator ihide);
 	void ShowFile(ListItems::const_iterator ishow);
