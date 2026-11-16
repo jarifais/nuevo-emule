@@ -45,6 +45,7 @@ static char THIS_FILE[] = __FILE__;
 //#define	WND1_BUTTON_XOFF	8 use .rc file
 #define	WND1_BUTTON_YOFF	5
 #define	WND1_BUTTON_WIDTH	170
+#define DOWNLOAD_FILTER_HEIGHT 28
 #define	WND1_BUTTON_HEIGHT	22	// don't set the height to something different than 22 unless you know exactly what you are doing!
 #define	WND1_NUM_BUTTONS	6
 
@@ -114,6 +115,7 @@ void CTransferWnd::OnInitialUpdate()
 	queuelistctrl.Init();
 	clientlistctrl.Init();
 	downloadclientsctrl.Init();
+	CreateDownloadFilterBar();
 
 	m_uWnd2 = (EWnd2)thePrefs.GetTransferWnd2();
 	ShowWnd2(m_uWnd2);
@@ -170,6 +172,105 @@ void CTransferWnd::OnInitialUpdate()
 
 	VerifyCatTabSize();
 	Localize();
+	ShowDownloadFilterBar(m_dwShowListIDC == IDC_DOWNLOADLIST || m_dwShowListIDC == IDC_DOWNLOADLIST + IDC_UPLOADLIST);
+}
+
+void CTransferWnd::CreateDownloadFilterBar()
+{
+	const CRect empty(0, 0, 0, 0);
+	if (!m_downloadFilterEdit.Create(WS_CHILD | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, empty, this, IDC_DL_FILTER_EDIT)
+		|| !m_downloadFilterWhole.Create(_T(""), WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX, empty, this, IDC_DL_FILTER_WHOLE)
+		|| !m_downloadFilterSelect.Create(_T(""), WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON, empty, this, IDC_DL_FILTER_SELECT)
+		|| !m_downloadFilterClear.Create(_T(""), WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON, empty, this, IDC_DL_FILTER_CLEAR)
+		|| !m_downloadFilterCount.Create(_T(""), WS_CHILD | SS_RIGHT | SS_CENTERIMAGE, empty, this, IDC_DL_FILTER_COUNT)) {
+		CWnd *controls[] = { &m_downloadFilterEdit, &m_downloadFilterWhole, &m_downloadFilterSelect, &m_downloadFilterClear, &m_downloadFilterCount };
+		for (CWnd *control : controls)
+			if (control->GetSafeHwnd())
+				control->DestroyWindow();
+		return;
+	}
+
+	CWnd *controls[] = { &m_downloadFilterEdit, &m_downloadFilterWhole, &m_downloadFilterSelect, &m_downloadFilterClear, &m_downloadFilterCount };
+	for (CWnd *control : controls)
+		control->SetFont(GetFont());
+	m_downloadFilterEdit.SetLimitText(512);
+	m_downloadFilterClear.EnableWindow(FALSE);
+	LocalizeDownloadFilterBar();
+
+	// Reserve a row before the list's resize anchors are established.
+	CRect rect;
+	downloadlistctrl.GetWindowRect(&rect);
+	ScreenToClient(&rect);
+	rect.top += DOWNLOAD_FILTER_HEIGHT;
+	if (rect.bottom < rect.top)
+		rect.bottom = rect.top;
+	downloadlistctrl.MoveWindow(&rect);
+}
+
+void CTransferWnd::LocalizeDownloadFilterBar()
+{
+	if (!m_downloadFilterEdit.GetSafeHwnd())
+		return;
+	const bool spanish = PRIMARYLANGID(thePrefs.GetLanguageID()) == LANG_SPANISH;
+	m_downloadFilterEdit.SendMessage(EM_SETCUEBANNER, FALSE,
+		reinterpret_cast<LPARAM>(spanish ? L"Buscar en descargas" : L"Find in downloads"));
+	m_downloadFilterWhole.SetWindowText(spanish ? _T("Palabra completa") : _T("Whole words"));
+	m_downloadFilterSelect.SetWindowText(spanish ? _T("Seleccionar todo") : _T("Select all matches"));
+	m_downloadFilterClear.SetWindowText(spanish ? _T("Limpiar") : _T("Clear"));
+}
+
+void CTransferWnd::LayoutDownloadFilterBar()
+{
+	if (!m_downloadFilterEdit.GetSafeHwnd() || !(m_downloadFilterEdit.GetStyle() & WS_VISIBLE))
+		return;
+	CRect r;
+	downloadlistctrl.GetWindowRect(&r);
+	ScreenToClient(&r);
+	if (r == m_downloadFilterLayout)
+		return;
+	m_downloadFilterLayout = r;
+	const int y = r.top - DOWNLOAD_FILTER_HEIGHT + 2;
+	const int h = DOWNLOAD_FILTER_HEIGHT - 5;
+	const int gap = 4;
+	const int countWidth = 72;
+	const int clearWidth = 56;
+	const int selectWidth = 126;
+	const int wholeWidth = 120;
+	const int editWidth = max(40, r.Width() - countWidth - clearWidth - selectWidth - wholeWidth - 4 * gap);
+	int x = r.left;
+	m_downloadFilterEdit.MoveWindow(x, y, editWidth, h);
+	x += editWidth + gap;
+	m_downloadFilterWhole.MoveWindow(x, y, wholeWidth, h);
+	x += wholeWidth + gap;
+	m_downloadFilterSelect.MoveWindow(x, y, selectWidth, h);
+	x += selectWidth + gap;
+	m_downloadFilterClear.MoveWindow(x, y, clearWidth, h);
+	x += clearWidth + gap;
+	m_downloadFilterCount.MoveWindow(x, y, countWidth, h);
+}
+
+void CTransferWnd::ShowDownloadFilterBar(bool show)
+{
+	if (!m_downloadFilterEdit.GetSafeHwnd())
+		return;
+	CWnd *controls[] = { &m_downloadFilterEdit, &m_downloadFilterWhole, &m_downloadFilterSelect, &m_downloadFilterClear, &m_downloadFilterCount };
+	for (CWnd *control : controls)
+		control->ShowWindow(show ? SW_SHOW : SW_HIDE);
+	if (show) {
+		m_downloadFilterLayout.SetRectEmpty();
+		LayoutDownloadFilterBar();
+		downloadlistctrl.ShowFilesCount();
+	}
+}
+
+void CTransferWnd::ApplyDownloadFilterBar()
+{
+	if (!m_downloadFilterEdit.GetSafeHwnd() || theApp.IsClosing())
+		return;
+	CString query;
+	m_downloadFilterEdit.GetWindowText(query);
+	downloadlistctrl.SetDownloadFilter(query, m_downloadFilterWhole.GetCheck() == BST_CHECKED);
+	m_downloadFilterClear.EnableWindow(!query.IsEmpty());
 }
 
 void CTransferWnd::ShowQueueCount(INT_PTR number)
@@ -308,6 +409,27 @@ BOOL CTransferWnd::PreTranslateMessage(MSG *pMsg)
 		}
 		break;
 	case WM_KEYDOWN:
+		if (m_downloadFilterEdit.GetSafeHwnd() && (m_downloadFilterEdit.GetStyle() & WS_VISIBLE)) {
+			const bool inList = pMsg->hwnd == downloadlistctrl.GetSafeHwnd();
+			const bool inEdit = pMsg->hwnd == m_downloadFilterEdit.GetSafeHwnd();
+			if ((inList || inEdit) && GetKeyState(VK_CONTROL) < 0 && pMsg->wParam == 'F') {
+				m_downloadFilterEdit.SetFocus();
+				m_downloadFilterEdit.SetSel(0, -1);
+				return TRUE;
+			}
+			if (inList && downloadlistctrl.HasDownloadFilter() && GetKeyState(VK_CONTROL) < 0 && pMsg->wParam == 'A') {
+				downloadlistctrl.SelectVisibleDownloads();
+				return TRUE;
+			}
+			if (inEdit && pMsg->wParam == VK_ESCAPE) {
+				m_downloadFilterEdit.SetWindowText(_T(""));
+				return TRUE;
+			}
+			if (inEdit && pMsg->wParam == VK_RETURN) {
+				downloadlistctrl.SetFocus();
+				return TRUE;
+			}
+		}
 		// Don't handle Ctrl+Tab in this window. It will be handled by main window.
 		if (pMsg->wParam == VK_TAB && GetKeyState(VK_CONTROL) < 0)
 			return FALSE;
@@ -385,6 +507,13 @@ void CTransferWnd::UpdateFilesCount(int iCount)
 		CString strBuffer(GetResString(IDS_TW_DOWNLOADS));
 		strBuffer.AppendFormat(_T(" (%i)"), iCount);
 		m_btnWnd1.SetWindowText(strBuffer);
+		if (m_downloadFilterEdit.GetSafeHwnd()) {
+			const int visible = downloadlistctrl.GetVisibleDownloadCount();
+			CString count;
+			count.Format(_T("%d / %d"), visible, iCount);
+			m_downloadFilterCount.SetWindowText(count);
+			m_downloadFilterSelect.EnableWindow(visible > 0);
+		}
 	}
 }
 
@@ -614,6 +743,7 @@ void CTransferWnd::SetWnd2Icons()
 void CTransferWnd::Localize()
 {
 	LocalizeToolbars();
+	LocalizeDownloadFilterBar();
 	SetDlgItemText(IDC_QUEUECOUNT_LABEL, GetResString(IDS_TW_QUEUE));
 	SetDlgItemText(IDC_QUEUE_REFRESH_BUTTON, GetResString(IDS_SV_UPDATE));
 
@@ -862,6 +992,28 @@ void CTransferWnd::OnLButtonUp(UINT /*nFlags*/, CPoint /*point*/)
 
 BOOL CTransferWnd::OnCommand(WPARAM wParam, LPARAM)
 {
+	if (m_downloadFilterEdit.GetSafeHwnd()) {
+		switch (LOWORD(wParam)) {
+		case IDC_DL_FILTER_EDIT:
+			if (HIWORD(wParam) == EN_CHANGE)
+				ApplyDownloadFilterBar();
+			return TRUE;
+		case IDC_DL_FILTER_WHOLE:
+			if (HIWORD(wParam) == BN_CLICKED)
+				ApplyDownloadFilterBar();
+			return TRUE;
+		case IDC_DL_FILTER_SELECT:
+			if (HIWORD(wParam) == BN_CLICKED)
+				downloadlistctrl.SelectVisibleDownloads();
+			return TRUE;
+		case IDC_DL_FILTER_CLEAR:
+			if (HIWORD(wParam) == BN_CLICKED) {
+				m_downloadFilterEdit.SetWindowText(_T(""));
+				m_downloadFilterEdit.SetFocus();
+			}
+			return TRUE;
+		}
+	}
 	// category filter menuitems
 	if (wParam >= MP_CAT_SET0 && wParam <= MP_CAT_SET0 + 99) {
 		if (wParam == MP_CAT_SET0 + 17)
@@ -1389,7 +1541,9 @@ void CTransferWnd::ShowList(uint32 dwListIDC)
 	GetDlgItem(dwListIDC)->GetWindowRect(&rcDown);
 	ScreenToClient(&rcDown);
 	rcDown.top = WND1_BUTTON_YOFF + WND1_BUTTON_HEIGHT + 1;
-	rcDown.bottom = rcWnd.bottom - WND1_BUTTON_HEIGHT;
+	if (dwListIDC == IDC_DOWNLOADLIST && m_downloadFilterEdit.GetSafeHwnd())
+		rcDown.top += DOWNLOAD_FILTER_HEIGHT;
+	rcDown.bottom = max(rcDown.top, rcWnd.bottom - WND1_BUTTON_HEIGHT);
 	m_wndSplitter.DestroyWindow();
 	RemoveAnchor(dwListIDC);
 	m_btnWnd2.ShowWindow(SW_HIDE);
@@ -1444,6 +1598,7 @@ void CTransferWnd::ShowList(uint32 dwListIDC)
 		ASSERT(0);
 	}
 	AddAnchor(dwListIDC, TOP_LEFT, BOTTOM_RIGHT);
+	ShowDownloadFilterBar(dwListIDC == IDC_DOWNLOADLIST);
 }
 
 void CTransferWnd::ShowSplitWindow(bool bReDraw)
@@ -1470,7 +1625,9 @@ void CTransferWnd::ShowSplitWindow(bool bReDraw)
 	downloadlistctrl.GetWindowRect(&rcDown);
 	ScreenToClient(&rcDown);
 	rcDown.top = WND1_BUTTON_YOFF + WND1_BUTTON_HEIGHT + 1;
-	rcDown.bottom = splitpos - 5; // Magic constant '5'.
+	if (m_downloadFilterEdit.GetSafeHwnd())
+		rcDown.top += DOWNLOAD_FILTER_HEIGHT;
+	rcDown.bottom = max(rcDown.top, splitpos - 5); // Magic constant '5'.
 	downloadlistctrl.MoveWindow(&rcDown);
 
 	uploadlistctrl.GetWindowRect(&rcDown);
@@ -1530,6 +1687,7 @@ void CTransferWnd::ShowSplitWindow(bool bReDraw)
 	GetDlgItem(IDC_QUEUE_REFRESH_BUTTON)->ShowWindow((m_uWnd2 == wnd2OnQueue) ? SW_SHOW : SW_HIDE);
 
 	UpdateListCount(m_uWnd2);
+	ShowDownloadFilterBar(true);
 }
 
 void CTransferWnd::OnDisableList()
@@ -1819,6 +1977,8 @@ void CTransferWnd::OnPaint()
 			UpdateSplitterRange();
 		}
 	}
+
+	LayoutDownloadFilterBar();
 
 	// Workaround to solve a glitch with WM_SETTINGCHANGE message
 	if (m_btnWnd1.m_hWnd && m_btnWnd1.GetBtnWidth(IDC_DOWNLOAD_ICO) != WND1_BUTTON_WIDTH)
