@@ -38,6 +38,9 @@
 #include "SearchDlg.h"
 #include "SharedFileList.h"
 #include "ImportParts.h"
+#include "OtherFunctions.h"
+#include <afxdlgs.h>
+#include <shlwapi.h>
 #include <array>
 #include <vector>
 #include <unordered_set>
@@ -378,7 +381,9 @@ void CDownloadListCtrl::UpdateItem(void *toupdate)
 		int iItem = FindItem(&find);
 		if (HasDownloadFilter() && updateItem->type == FILE_TYPE) {
 			CPartFile *file = static_cast<CPartFile*>(updateItem->value);
-			const bool visible = file->CheckShowItemInGivenCat(m_curTab) && MatchesDownloadFilter(file);
+			const bool visible = MatchesDownloadFilter(file) && (iItem >= 0 || file->CheckShowItemInGivenCat(m_curTab));
+			// Category/status changes arrive through UpdateCurrentCategoryView; avoid
+			// reevaluating the category predicate for visible periodic speed updates.
 			if (visible != (iItem >= 0)) {
 				if (visible)
 					ShowFile(it);
