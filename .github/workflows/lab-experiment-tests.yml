@@ -1,0 +1,39 @@
+name: Laboratorio A/B - tests sin eMule
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/lab_experiment.py'
+      - 'tests/test_lab_experiment.py'
+      - '.github/workflows/lab-experiment-tests.yml'
+  push:
+    branches:
+      - feature/lab-ab-experiment-scaffold
+    paths:
+      - 'scripts/lab_experiment.py'
+      - 'tests/test_lab_experiment.py'
+      - '.github/workflows/lab-experiment-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Pruebas unitarias de calendario y analizador
+        run: python -m unittest discover -s tests -v
+      - name: Comprobar que sin datos no se inventa una mejora
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/lab_experiment.py plan --start '2026-12-01T00:00:00+01:00' --out "$RUNNER_TEMP/plan.json"
+          : > "$RUNNER_TEMP/empty.jsonl"
+          python scripts/lab_experiment.py report --plan "$RUNNER_TEMP/plan.json" --samples "$RUNNER_TEMP/empty.jsonl" --out "$RUNNER_TEMP/report.json"
+          python -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r["valid_blocks"] == 0 and not r["automatic_decision"] and all(v["evidence_grade"] == "insufficient" for v in r["comparisons"].values())' "$RUNNER_TEMP/report.json"
