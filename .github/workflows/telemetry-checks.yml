@@ -1,0 +1,47 @@
+name: Telemetria eMule - contrato y reporte (sin Windows)
+
+on:
+  pull_request:
+    paths:
+      - 'srchybrid/LabTelemetry.h'
+      - 'srchybrid/DownloadQueue.cpp'
+      - 'scripts/lab_telemetry_report.py'
+      - 'tests/test_lab_telemetry_report.py'
+      - '.github/workflows/telemetry-checks.yml'
+  push:
+    branches:
+      - feature/lab-telemetry-stage1
+    paths:
+      - 'srchybrid/LabTelemetry.h'
+      - 'srchybrid/DownloadQueue.cpp'
+      - 'scripts/lab_telemetry_report.py'
+      - 'tests/test_lab_telemetry_report.py'
+      - '.github/workflows/telemetry-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verificar contratos y resumen sin decision automatica
+        run: python -m unittest discover -s tests -v
+      - name: Verificar integracion de sonda, sin afirmar compilacion Windows
+        shell: python
+        run: |
+          from pathlib import Path
+          src = Path("srchybrid/DownloadQueue.cpp").read_text(encoding="utf-8")
+          hdr = Path("srchybrid/LabTelemetry.h").read_text(encoding="utf-8")
+          assert '#include "LabTelemetry.h"' in src
+          assert 'LabTelemetry::IsSampleDue' in src and 'LabTelemetry::AppendSnapshot' in src
+          assert 'GetDownDataOverheadKad()' in src
+          assert 'SAMPLE_PERIOD_MS = 60000' in hdr
+          assert 'MAX_LOG_BYTES = 8 * 1024 * 1024' in hdr
+          print("Static integration guards passed. Windows compilation remains pending.")
