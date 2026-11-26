@@ -38,6 +38,7 @@
 #include "TaskbarNotifier.h"
 #include "MenuCmds.h"
 #include "Log.h"
+#include "LabTelemetry.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -374,6 +375,10 @@ void CDownloadQueue::Process()
 	}
 
 	const DWORD curTick = ::GetTickCount();
+	DWORD labSampleElapsed = 0;
+	const bool labSampleDue = LabTelemetry::IsSampleDue(curTick, labSampleElapsed);
+	uint32 labFilesTotal = 0, labFilesActive = 0, labFilesDownloading = 0;
+	ULONGLONG labSources = 0, labTransferring = 0;
 	while (!average_dr_hist.IsEmpty() && curTick >= average_dr_hist.Head().timestamp + SEC2MS(10)) {
 		m_datarateMS -= average_dr_hist.Head().datalen;
 		average_dr_hist.RemoveHead();
@@ -391,9 +396,7 @@ void CDownloadQueue::Process()
 	theStats.m_dwOverallStatus = 0;
 	//file list is already sorted by prio, therefore I removed all the extra loops.
 	for (POSITION pos = filelist.GetHeadPosition(); pos != NULL;) {
-		CPartFile *cur_file = filelist.GetNext(pos);
-
-		// maintain global download stats
+		CPartFile *cur_file = filelist.GetNext(pos);		// Aggregate costly per-file counts only once per minute.		if (labSampleDue) {			++labFilesTotal;			if (inSet(cur_file->GetStatus(), PS_READY, PS_EMPTY))				++labFilesActive;			const UINT transferring = cur_file->GetTransferringSrcCount();			if (transferring != 0)				++labFilesDownloading;			labTransferring += transferring;			labSources += cur_file->GetSourceCount();		}		// maintain global download stats
 		theStats.m_fGlobalDone += (float)cur_file->GetCompletedSize();
 		theStats.m_fGlobalSize += (float)cur_file->GetFileSize();
 
@@ -409,9 +412,7 @@ void CDownloadQueue::Process()
 	}
 
 	average_dr_hist.AddTail(TransferredData{datarateX, curTick});
-	m_datarateMS += datarateX;
-
-	if (m_udcounter == 5) {
+	m_datarateMS += datarateX;	if (labSampleDue) {		LabTelemetry::Snapshot snap = {};		snap.tick_ms = curTick;		snap.elapsed_ms = labSampleElapsed;		snap.rate_bytes_per_second = m_datarate;		snap.files_total = labFilesTotal;		snap.files_active = labFilesActive;		snap.files_downloading = labFilesDownloading;		snap.listed_sources = labSources;		snap.transferring_clients = labTransferring;		snap.session_received_bytes = theStats.sessionReceivedBytes;		snap.kad_down_overhead_bytes = theStats.GetDownDataOverheadKad();		snap.kad_up_overhead_bytes = theStats.GetUpDataOverheadKad();		snap.server_down_overhead_bytes = theStats.GetDownDataOverheadServer();		if (!LabTelemetry::AppendSnapshot(thePrefs.GetMuleDirectory(EMULE_LOGDIR, true), snap))			::OutputDebugString(_T("eMule lab telemetry: could not append snapshot\\n"));	}	if (m_udcounter == 5) {
 		if (theApp.serverconnect->IsUDPSocketAvailable()
 			&& (!m_lastudpstattime || curTick >= m_lastudpstattime + UDPSERVERSTATTIME))
 		{
