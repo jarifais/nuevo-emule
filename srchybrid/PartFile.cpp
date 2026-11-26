@@ -2318,20 +2318,19 @@ uint32 CPartFile::Process(uint32 factor, UINT icounter)
 			NotifyStatusChange();
 
 		if (GetMaxSourcePerFileUDP() > GetSourceCount()) {
-			if (theApp.downloadqueue->DoKademliaFileRequest() && (Kademlia::CKademlia::GetTotalFile() < KADEMLIATOTALFILE) && (curTick >= m_LastSearchTimeKad) && Kademlia::CKademlia::IsConnected() && theApp.IsConnected() && !m_stopped) { //Once we can handle lowID users in Kad, we remove the second IsConnected
+			// A search already in progress must not waste the shared Kad source-search slot.
+			if (!GetKadFileSearchID() && theApp.downloadqueue->DoKademliaFileRequest() && (Kademlia::CKademlia::GetTotalFile() < KADEMLIATOTALFILE) && (curTick >= m_LastSearchTimeKad) && Kademlia::CKademlia::IsConnected() && theApp.IsConnected() && !m_stopped) { //Once we can handle lowID users in Kad, we remove the second IsConnected
 				//Kademlia
 				theApp.downloadqueue->SetLastKademliaFileRequest();
-				if (!GetKadFileSearchID()) {
-					Kademlia::CSearch *pSearch = Kademlia::CSearchManager::PrepareLookup(Kademlia::CSearch::FILE, true, Kademlia::CUInt128(GetFileHash()));
-					if (pSearch) {
-						if (m_TotalSearchesKad < 7)
-							++m_TotalSearchesKad;
-						m_LastSearchTimeKad = curTick + (KADEMLIAREASKTIME * m_TotalSearchesKad);
-						pSearch->SetGUIName((CStringW)GetFileName());
-						SetKadFileSearchID(pSearch->GetSearchID());
-					} else
-						SetKadFileSearchID(0);
-				}
+				Kademlia::CSearch *pSearch = Kademlia::CSearchManager::PrepareLookup(Kademlia::CSearch::FILE, true, Kademlia::CUInt128(GetFileHash()));
+				if (pSearch) {
+					if (m_TotalSearchesKad < 7)
+						++m_TotalSearchesKad;
+					m_LastSearchTimeKad = curTick + (KADEMLIAREASKTIME * m_TotalSearchesKad);
+					pSearch->SetGUIName((CStringW)GetFileName());
+					SetKadFileSearchID(pSearch->GetSearchID());
+				} else
+					SetKadFileSearchID(0);
 			}
 		} else if (GetKadFileSearchID())
 			Kademlia::CSearchManager::StopSearch(GetKadFileSearchID(), true);
@@ -2966,7 +2965,7 @@ void CPartFile::PerformFileCompleteEnd(DWORD dwResult)
 		thePrefs.Add2DownSessionCompletedFiles();
 		thePrefs.SaveCompletedDownloadsStat();
 
-		// 05-Jän-2004 [bc]: ed2k and Kad are already full of totally wrong and/or not properly
+		// 05-JÃ¤n-2004 [bc]: ed2k and Kad are already full of totally wrong and/or not properly
 		// attached meta data. Take the chance to clean any available meta data tags and provide
 		// only tags which were determined by us.
 		UpdateMetaDataTags();
@@ -4569,7 +4568,7 @@ bool CPartFile::GetNextRequestedBlock(CUpDownClient *sender, Requested_Block_Str
 	//      completed before starting to download an other one.
 	//
 	// The frequency criterion defines 4 grades of availability: very rare, rare, almost rare,
-	// and common. Inside each grade, the criteria have a specific ‘weight’, used
+	// and common. Inside each grade, the criteria have a specific Â‘weightÂ’, used
 	// to calculate the priority of chunks. The chunk(s) with the highest
 	// priority (highest=0, lowest=0xffff) is/are selected first.
 	//
