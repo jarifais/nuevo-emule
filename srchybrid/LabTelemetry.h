@@ -1,5 +1,5 @@
-// eMule laboratory: phase-1 low-frequency local metrics (no protocol changes).
-// Included only from DownloadQueue.cpp; no project-file changes required.
+// eMule laboratory: queue snapshots and atomic Kad event counters (no protocol changes).
+// Included from DownloadQueue.cpp and PartFile.cpp; no project-file changes required.
 #pragma once
 
 #include <windows.h>
@@ -57,7 +57,7 @@ namespace LabTelemetry
     }
 
     // One small write per minute. This phase deliberately does not pretend
-    // to implement the full A/B schema, feature toggles or Kad event metrics.
+    // to implement the full A/B schema, feature toggles or per-source latency metrics.
     inline bool AppendSnapshot(const CString& log_directory, const Snapshot& s)
     {
         if (log_directory.IsEmpty())
