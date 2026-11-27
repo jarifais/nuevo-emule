@@ -18,6 +18,14 @@ CUMULATIVE = (
     "kad_up_overhead_bytes_cumulative",
     "server_down_overhead_bytes_cumulative",
 )
+KAD_CUMULATIVE = (
+    "kad_slots_consumed_cumulative",
+    "kad_slots_wasted_active_search_cumulative",
+    "kad_lookups_started_cumulative",
+    "kad_lookups_prepare_failed_cumulative",
+    "kad_source_candidates_cumulative",
+    "kad_new_sources_accepted_cumulative",
+)
 INSTANT = (
     "download_rate_bytes_per_second",
     "files_total", "files_active", "files_downloading",
@@ -41,7 +49,8 @@ def parse_timestamp(value: str) -> datetime:
 def validate(row: dict) -> dict:
     if not isinstance(row, dict):
         raise ValueError("record must be an object")
-    if row.get("schema_version") != 1 or row.get("record_type") != "download_queue_snapshot":
+    version = row.get("schema_version")
+    if type(version) is not int or version not in (1, 2) or row.get("record_type") != "download_queue_snapshot":
         raise ValueError("unsupported telemetry schema or record")
     if row.get("mode") != "telemetry_only_no_feature_flags":
         raise ValueError("unknown or unverified experiment mode")
@@ -50,7 +59,7 @@ def validate(row: dict) -> dict:
     if not isinstance(row.get("session_id"), str) or not row["session_id"]:
         raise ValueError("missing session_id")
     parse_timestamp(row.get("timestamp_utc"))
-    for key in NUMERIC:
+    for key in NUMERIC + (KAD_CUMULATIVE if version == 2 else ()):
         value = row.get(key)
         if type(value) is not int or value < 0:
             raise ValueError(f"{key} must be a nonnegative integer")
@@ -63,7 +72,7 @@ def validate(row: dict) -> dict:
 
 def analyze(paths: list[Path]) -> dict:
     """Never accept or discard optimizations; report measurable baseline only."""
-    sessions: dict[str, list[dict]] = defaultdict(list)
+    sessions: dict[tuple[str, int], list[dict]] = defaultdict(list)
     rejected = []
     total = 0
     for path in paths:
@@ -74,14 +83,15 @@ def analyze(paths: list[Path]) -> dict:
                 total += 1
                 try:
                     row = validate(json.loads(line))
-                    sessions[row["session_id"]].append(row)
+                    sessions[(row["session_id"], row["schema_version"])].append(row)
                 except (ValueError, TypeError, json.JSONDecodeError) as exc:
                     rejected.append({"record_number": total, "reason": str(exc)})
     results = []
-    for session, rows in sorted(sessions.items()):
+    for (session, version), rows in sorted(sessions.items()):
         rows.sort(key=lambda x: x["timestamp_utc"])
         elapsed = 0.0
-        deltas = dict.fromkeys(CUMULATIVE, 0)
+        counters = CUMULATIVE + (KAD_CUMULATIVE if version == 2 else ())
+        deltas = dict.fromkeys(counters, 0)
         valid_intervals = 0
         gaps = 0
         for earlier, later in zip(rows, rows[1:]):
@@ -93,15 +103,26 @@ def analyze(paths: list[Path]) -> dict:
             if seconds > 180:
                 gaps += 1
                 continue  # never count disjoint time ranges as continuous
-            if any(later[k] < earlier[k] for k in CUMULATIVE):
+            if any(later[k] < earlier[k] for k in counters):
                 rejected.append({"session": session, "reason": "cumulative counter reset"})
                 continue
             valid_intervals += 1
             elapsed += seconds
-            for key in CUMULATIVE:
+            for key in counters:
                 deltas[key] += later[key] - earlier[key]
+        kad = ({key: deltas[key] for key in KAD_CUMULATIVE} if version == 2 else None)
+        slots = deltas.get("kad_slots_consumed_cumulative", 0)
+        wasted = deltas.get("kad_slots_wasted_active_search_cumulative", 0)
+        started = deltas.get("kad_lookups_started_cumulative", 0)
+        failed = deltas.get("kad_lookups_prepare_failed_cumulative", 0)
+        accepted = deltas.get("kad_new_sources_accepted_cumulative", 0)
         results.append({
             "session_id": session,
+            "schema_version": version,
+            "kad_cumulative_deltas": kad,
+            "kad_slot_waste_fraction": round(wasted / slots, 5) if version == 2 and slots else None,
+            "kad_accepted_new_sources_per_minute": round(60 * accepted / elapsed, 5) if version == 2 and elapsed else None,
+            "kad_slot_accounting_consistent": (slots == wasted + started + failed) if version == 2 and elapsed else None,
             "valid_snapshots": len(rows),
             "valid_intervals": valid_intervals,
             "coverage_seconds": elapsed,
@@ -121,7 +142,7 @@ def analyze(paths: list[Path]) -> dict:
         "rejected_count": len(rejected),
         "rejected_examples": rejected[:20],
         "sessions": results,
-        "warning": "No Kad search latencies, application-acknowledged flags or A/B causal inference.",
+        "warning": "Kad accepted sources are list insertions, not proven usable; no Kad source latency, application-acknowledged flags or A/B inference.",
     }
 
 
