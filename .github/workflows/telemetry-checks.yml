@@ -5,15 +5,18 @@ on:
     paths:
       - 'srchybrid/LabTelemetry.h'
       - 'srchybrid/DownloadQueue.cpp'
+      - 'srchybrid/PartFile.cpp'
       - 'scripts/lab_telemetry_report.py'
       - 'tests/test_lab_telemetry_report.py'
       - '.github/workflows/telemetry-checks.yml'
   push:
     branches:
       - feature/lab-telemetry-stage1
+      - feature/lab-kad-telemetry-stage2
     paths:
       - 'srchybrid/LabTelemetry.h'
       - 'srchybrid/DownloadQueue.cpp'
+      - 'srchybrid/PartFile.cpp'
       - 'scripts/lab_telemetry_report.py'
       - 'tests/test_lab_telemetry_report.py'
       - '.github/workflows/telemetry-checks.yml'
@@ -44,4 +47,11 @@ jobs:
           assert 'GetDownDataOverheadKad()' in src
           assert 'SAMPLE_PERIOD_MS = 60000' in hdr
           assert 'MAX_LOG_BYTES = 8 * 1024 * 1024' in hdr
-          print("Static integration guards passed. Windows compilation remains pending.")
+          assert 'KadEventCounters' in hdr and 'kad_slots_consumed_cumulative' in hdr
+          assert 'LabTelemetry::ReadKadCounters' in src
+          assert 'LabTelemetry::CountKadNewSourceAccepted' in src
+          part = Path("srchybrid/PartFile.cpp").read_bytes()
+          assert b'LabTelemetry::CountKadSlotConsumed()' in part
+          assert b'LabTelemetry::CountKadSlotWastedActiveSearch()' in part
+          assert b'LabTelemetry::CountKadLookupStarted()' in part
+          print("Kad telemetry static integration guards passed. Windows compilation remains pending.")
