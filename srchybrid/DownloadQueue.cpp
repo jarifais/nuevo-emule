@@ -47,6 +47,34 @@ static char THIS_FILE[] = __FILE__;
 #endif
 
 
+namespace {
+    volatile LONG g_kad_slots_consumed = 0;
+    volatile LONG g_kad_slots_wasted_active_search = 0;
+    volatile LONG g_kad_lookups_started = 0;
+    volatile LONG g_kad_lookups_prepare_failed = 0;
+    volatile LONG g_kad_source_candidates = 0;
+    volatile LONG g_kad_new_sources_accepted = 0;
+}
+namespace LabTelemetry {
+    void CountKadSlotConsumed() { ::InterlockedIncrement(&g_kad_slots_consumed); }
+    void CountKadSlotWastedActiveSearch() { ::InterlockedIncrement(&g_kad_slots_wasted_active_search); }
+    void CountKadLookupStarted() { ::InterlockedIncrement(&g_kad_lookups_started); }
+    void CountKadLookupPrepareFailed() { ::InterlockedIncrement(&g_kad_lookups_prepare_failed); }
+    void CountKadSourceCandidate() { ::InterlockedIncrement(&g_kad_source_candidates); }
+    void CountKadNewSourceAccepted() { ::InterlockedIncrement(&g_kad_new_sources_accepted); }
+
+    KadEventCounters ReadKadCounters() {
+        KadEventCounters snapshot = {};
+        snapshot.slots_consumed = static_cast<DWORD>(::InterlockedCompareExchange(&g_kad_slots_consumed, 0, 0));
+        snapshot.slots_wasted_active_search = static_cast<DWORD>(::InterlockedCompareExchange(&g_kad_slots_wasted_active_search, 0, 0));
+        snapshot.lookups_started = static_cast<DWORD>(::InterlockedCompareExchange(&g_kad_lookups_started, 0, 0));
+        snapshot.lookups_prepare_failed = static_cast<DWORD>(::InterlockedCompareExchange(&g_kad_lookups_prepare_failed, 0, 0));
+        snapshot.source_candidates = static_cast<DWORD>(::InterlockedCompareExchange(&g_kad_source_candidates, 0, 0));
+        snapshot.new_sources_accepted = static_cast<DWORD>(::InterlockedCompareExchange(&g_kad_new_sources_accepted, 0, 0));
+        return snapshot;
+    }
+}
+
 CDownloadQueue::CDownloadQueue()
 	: cur_udpserver()
 	, average_dr_hist(512, 512)
@@ -441,6 +469,7 @@ void CDownloadQueue::Process()
 		snap.kad_down_overhead_bytes = theStats.GetDownDataOverheadKad();
 		snap.kad_up_overhead_bytes = theStats.GetUpDataOverheadKad();
 		snap.server_down_overhead_bytes = theStats.GetDownDataOverheadServer();
+        snap.kad = LabTelemetry::ReadKadCounters();
 		if (!LabTelemetry::AppendSnapshot(thePrefs.GetMuleDirectory(EMULE_LOGDIR, true), snap))
 			::OutputDebugString(_T("eMule lab telemetry: could not append snapshot\\n"));
 	}
@@ -1648,7 +1677,9 @@ void CDownloadQueue::KademliaSearchFile(uint32 nSearchID, const Kademlia::CUInt1
 	if (ctemp != NULL) {
 		// add encryption settings
 		ctemp->SetConnectOptions(byCryptOptions);
-		CheckAndAddSource(temp, ctemp);
+        LabTelemetry::CountKadSourceCandidate();
+        if (CheckAndAddSource(temp, ctemp))
+            LabTelemetry::CountKadNewSourceAccepted();
 	}
 }
 
