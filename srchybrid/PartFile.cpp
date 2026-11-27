@@ -2322,22 +2322,22 @@ uint32 CPartFile::Process(uint32 factor, UINT icounter)
 			if (theApp.downloadqueue->DoKademliaFileRequest() && (Kademlia::CKademlia::GetTotalFile() < KADEMLIATOTALFILE) && (curTick >= m_LastSearchTimeKad) && Kademlia::CKademlia::IsConnected() && theApp.IsConnected() && !m_stopped) { //Once we can handle lowID users in Kad, we remove the second IsConnected
 				//Kademlia
 				theApp.downloadqueue->SetLastKademliaFileRequest();
-                LabTelemetry::CountKadSlotConsumed();
+				LabTelemetry::CountKadSlotConsumed();
 				if (!GetKadFileSearchID()) {
 					Kademlia::CSearch *pSearch = Kademlia::CSearchManager::PrepareLookup(Kademlia::CSearch::FILE, true, Kademlia::CUInt128(GetFileHash()));
 					if (pSearch) {
-                        LabTelemetry::CountKadLookupStarted();
+						LabTelemetry::CountKadLookupStarted();
 						if (m_TotalSearchesKad < 7)
 							++m_TotalSearchesKad;
 						m_LastSearchTimeKad = curTick + (KADEMLIAREASKTIME * m_TotalSearchesKad);
 						pSearch->SetGUIName((CStringW)GetFileName());
 						SetKadFileSearchID(pSearch->GetSearchID());
 					} else {
-                        LabTelemetry::CountKadLookupPrepareFailed();
+						LabTelemetry::CountKadLookupPrepareFailed();
 						SetKadFileSearchID(0);
-                    }
-                } else {
-                    LabTelemetry::CountKadSlotWastedActiveSearch();
+					}
+				} else {
+					LabTelemetry::CountKadSlotWastedActiveSearch();
 				}
 			}
 		} else if (GetKadFileSearchID())
