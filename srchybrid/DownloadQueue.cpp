@@ -469,7 +469,7 @@ void CDownloadQueue::Process()
 		snap.kad_down_overhead_bytes = theStats.GetDownDataOverheadKad();
 		snap.kad_up_overhead_bytes = theStats.GetUpDataOverheadKad();
 		snap.server_down_overhead_bytes = theStats.GetDownDataOverheadServer();
-        snap.kad = LabTelemetry::ReadKadCounters();
+		snap.kad = LabTelemetry::ReadKadCounters();
 		if (!LabTelemetry::AppendSnapshot(thePrefs.GetMuleDirectory(EMULE_LOGDIR, true), snap))
 			::OutputDebugString(_T("eMule lab telemetry: could not append snapshot\\n"));
 	}
@@ -1677,9 +1677,9 @@ void CDownloadQueue::KademliaSearchFile(uint32 nSearchID, const Kademlia::CUInt1
 	if (ctemp != NULL) {
 		// add encryption settings
 		ctemp->SetConnectOptions(byCryptOptions);
-        LabTelemetry::CountKadSourceCandidate();
-        if (CheckAndAddSource(temp, ctemp))
-            LabTelemetry::CountKadNewSourceAccepted();
+		LabTelemetry::CountKadSourceCandidate();
+		if (CheckAndAddSource(temp, ctemp))
+			LabTelemetry::CountKadNewSourceAccepted();
 	}
 }
 
